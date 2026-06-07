@@ -1,0 +1,1 @@
+docker exec -it  local-llm-gateway bash

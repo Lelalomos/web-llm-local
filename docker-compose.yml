@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: local-ollama-service
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION:-false}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
+      - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-1}
+      - OLLAMA_GPU_OVERHEAD=${OLLAMA_GPU_OVERHEAD:-0}
+    volumes:
+      - ${OLLAMA_MODELS_DIR:-./models}:/root/.ollama/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: local-llm-gateway
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+      - DEFAULT_OLLAMA_MODEL=${DEFAULT_OLLAMA_MODEL:-gemma2:2b}
+      - OLLAMA_FORCE_NUM_GPU=${OLLAMA_FORCE_NUM_GPU:-999}
+      - OLLAMA_DEFAULT_NUM_CTX=${OLLAMA_DEFAULT_NUM_CTX:-2048}
+      - OLLAMA_DEFAULT_NUM_BATCH=${OLLAMA_DEFAULT_NUM_BATCH:-128}
+      - OLLAMA_GEMMA2_2B_NUM_GPU=${OLLAMA_GEMMA2_2B_NUM_GPU:-999}
+      - OLLAMA_GEMMA2_2B_NUM_CTX=${OLLAMA_GEMMA2_2B_NUM_CTX:-2048}
+      - OLLAMA_GEMMA2_2B_NUM_BATCH=${OLLAMA_GEMMA2_2B_NUM_BATCH:-256}
+      - OLLAMA_GEMMA4_E2B_NUM_GPU=${OLLAMA_GEMMA4_E2B_NUM_GPU:-999}
+      - OLLAMA_GEMMA4_E2B_NUM_CTX=${OLLAMA_GEMMA4_E2B_NUM_CTX:-2048}
+      - OLLAMA_GEMMA4_E2B_NUM_BATCH=${OLLAMA_GEMMA4_E2B_NUM_BATCH:-128}
+      - OLLAMA_GEMMA_LARGE_NUM_CTX=${OLLAMA_GEMMA_LARGE_NUM_CTX:-1024}
+      - OLLAMA_GEMMA_LARGE_NUM_BATCH=${OLLAMA_GEMMA_LARGE_NUM_BATCH:-32}
+      - OLLAMA_GEMMA_LARGE_NUM_GPU=${OLLAMA_GEMMA_LARGE_NUM_GPU:-}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  web-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: local-llm-web-ui
+    ports:
+      - "8000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

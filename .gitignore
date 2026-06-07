@@ -1,0 +1,9 @@
+# Ignore local Ollama binaries, libraries, and model blobs
+/bin/
+/lib/
+/models/
+/backend/data/chat_memory/
+ollama-linux-amd64.tgz
+*.log
+*.pyc
+__pycache__/

@@ -1,0 +1,413 @@
+import os
+import json
+import threading
+import re
+from copy import deepcopy
+import requests
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi.responses import StreamingResponse
+from duckduckgo_search import DDGS
+from chat_memory import finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
+from document_utils import extract_document_text
+from model_bootstrap import DEFAULT_OLLAMA_MODEL, ensure_default_model_available
+from ollama_options import apply_gpu_defaults
+from search_policy import should_auto_search
+from task_modes import apply_task_mode
+
+app = FastAPI(title="Lightweight LLM Gateway")
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
+MAX_CODING_CONTINUATIONS = 2
+CODING_TASK_MODES = {"code_writer", "code_editor", "code_reviewer", "bug_fixer"}
+AUTO_SUMMARY_CHECK_SECONDS = int(os.getenv("CHAT_MEMORY_CHECK_SECONDS", "60"))
+CONTINUE_CODE_PROMPT = (
+    "Continue from the exact next line of the previous answer. "
+    "Do not repeat prior text. If you were inside a code block, continue that same code block."
+)
+summary_worker_stop_event = threading.Event()
+summary_worker_lock = threading.Lock()
+summary_worker_thread = None
+bootstrap_worker_thread = None
+MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._:/-]+$")
+
+# Proxy to get available models
+@app.get("/api/tags")
+def get_tags():
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Ollama server offline: {e}")
+
+
+def _normalize_model_name(payload: dict) -> str:
+    model = str(payload.get("model", "")).strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+    if not MODEL_NAME_PATTERN.fullmatch(model):
+        raise HTTPException(status_code=400, detail="invalid model name")
+    return model
+
+
+def _ollama_json_request(path: str, payload: dict, timeout: int = 120, method: str = "POST") -> dict:
+    response = requests.request(method, f"{OLLAMA_URL}{path}", json=payload, timeout=timeout)
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+    if not response.text.strip():
+        return {"status": "success"}
+    try:
+        return response.json()
+    except requests.exceptions.JSONDecodeError:
+        return {"status": response.text.strip()}
+
+
+@app.post("/api/models/pull")
+def pull_model(payload: dict = Body(...)):
+    model = _normalize_model_name(payload)
+    result = _ollama_json_request("/api/pull", {"model": model, "stream": False}, timeout=1800)
+    return {"model": model, "status": result.get("status", "success")}
+
+
+@app.post("/api/models/delete")
+def delete_model(payload: dict = Body(...)):
+    model = _normalize_model_name(payload)
+    result = _ollama_json_request("/api/delete", {"model": model}, timeout=120, method="DELETE")
+    return {"model": model, "status": result.get("status", "success")}
+
+# Parse document and return extracted text
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    filename = file.filename
+    content = await file.read()
+
+    try:
+        extracted_text, character_count = extract_document_text(filename, content)
+        return {
+            "filename": filename,
+            "text": extracted_text,
+            "character_count": character_count
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error parsing file: {e}")
+
+from search_service import execute_web_search
+
+
+def _search_requested(payload: dict) -> bool:
+    search_mode = payload.pop("web_search_mode", None)
+    legacy_web_search = payload.pop("web_search", None)
+
+    if search_mode == "on":
+        return True
+    if search_mode == "off":
+        return False
+    if isinstance(legacy_web_search, bool):
+        return legacy_web_search
+
+    messages = payload.get("messages") or []
+    if not messages:
+        return False
+
+    latest_message = messages[-1]
+    if latest_message.get("role") != "user":
+        return False
+
+    return should_auto_search(latest_message.get("content", ""))
+
+
+def _search_status_line(search_used: bool) -> str:
+    return json.dumps({"type": "search_status", "search_used": search_used}) + "\n"
+
+
+def _is_document_prompt(payload: dict) -> bool:
+    messages = payload.get("messages") or []
+    if not messages:
+        return False
+
+    latest_message = messages[-1]
+    if latest_message.get("role") != "user":
+        return False
+
+    content = str(latest_message.get("content", ""))
+    return content.startswith('Context from uploaded file "') and "Use the file content above to answer this prompt:" in content
+
+
+def _apply_document_chat_defaults(payload: dict) -> None:
+    if _is_document_prompt(payload) and "think" not in payload:
+        payload["think"] = False
+
+
+def _normalize_session_payload(payload: dict) -> tuple[str, str, list[dict], str]:
+    model = str(payload.get("model", "")).strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(status_code=400, detail="messages are required")
+
+    session_id = str(payload.get("session_id", "")).strip() or "session"
+    task_mode = str(payload.get("task_mode", "general")).strip() or "general"
+    return model, session_id, messages, task_mode
+
+
+def _persist_completed_chat(session_id: str, model: str, task_mode: str, messages: list[dict], assistant_content: str) -> None:
+    if not assistant_content.strip():
+        return
+
+    completed_messages = list(messages) + [{"role": "assistant", "content": assistant_content}]
+    upsert_active_session(session_id, model, task_mode, completed_messages)
+
+
+def _run_pending_summaries(current_session_id: str | None = None) -> None:
+    if not summary_worker_lock.acquire(blocking=False):
+        return
+
+    try:
+        summarize_stale_sessions(OLLAMA_URL, current_session_id)
+    finally:
+        summary_worker_lock.release()
+
+
+def _summary_worker_loop() -> None:
+    while not summary_worker_stop_event.wait(AUTO_SUMMARY_CHECK_SECONDS):
+        _run_pending_summaries()
+
+
+def _bootstrap_model_loop() -> None:
+    try:
+        ensure_default_model_available(OLLAMA_URL, DEFAULT_OLLAMA_MODEL)
+    except requests.exceptions.RequestException:
+        return
+
+
+@app.on_event("startup")
+def startup_event():
+    global summary_worker_thread, bootstrap_worker_thread
+    summary_worker_stop_event.clear()
+    summary_worker_thread = threading.Thread(target=_summary_worker_loop, name="chat-summary-worker", daemon=True)
+    summary_worker_thread.start()
+    bootstrap_worker_thread = threading.Thread(target=_bootstrap_model_loop, name="ollama-bootstrap-worker", daemon=True)
+    bootstrap_worker_thread.start()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    summary_worker_stop_event.set()
+    if summary_worker_thread and summary_worker_thread.is_alive():
+        summary_worker_thread.join(timeout=2)
+    if bootstrap_worker_thread and bootstrap_worker_thread.is_alive():
+        bootstrap_worker_thread.join(timeout=2)
+
+
+def _inject_search_context(payload: dict, web_search_enabled: bool) -> bool:
+    if not web_search_enabled or "messages" not in payload or not payload["messages"]:
+        return False
+
+    latest_message = payload["messages"][-1]
+    if latest_message.get("role") != "user":
+        return False
+
+    query = latest_message.get("content", "")
+    search_context, _ = execute_web_search(query)
+
+    if not search_context or search_context == "No web search results found.":
+        return False
+
+    search_system_prompt = (
+        "Use the following Web Search results to help answer the user's question:\n\n"
+        f"{search_context}\n\n"
+        "Provide citations for the URLs when referencing them."
+    )
+
+    for msg in payload["messages"]:
+        if msg.get("role") == "system":
+            msg["content"] = msg["content"] + "\n\n" + search_system_prompt
+            return True
+
+    payload["messages"].insert(0, {"role": "system", "content": search_system_prompt})
+    return True
+
+
+def _should_continue_coding_response(task_mode: str, response_json: dict) -> bool:
+    if task_mode not in CODING_TASK_MODES:
+        return False
+
+    message = response_json.get("message", {})
+    return response_json.get("done_reason") == "length" and bool(message.get("content", ""))
+
+
+def _build_continuation_payload(payload: dict, assistant_content: str) -> dict:
+    continuation_payload = deepcopy(payload)
+    continuation_payload["messages"] = list(continuation_payload.get("messages", [])) + [
+        {"role": "assistant", "content": assistant_content},
+        {"role": "user", "content": CONTINUE_CODE_PROMPT},
+    ]
+    continuation_payload["stream"] = False
+    return continuation_payload
+
+
+def _merge_response_content(base_response: dict, continuation_response: dict) -> dict:
+    base_message = base_response.setdefault("message", {})
+    continuation_message = continuation_response.get("message", {})
+    base_content = base_message.get("content", "")
+    continuation_content = continuation_message.get("content", "")
+
+    if base_content and continuation_content and not continuation_content.startswith("\n"):
+        base_message["content"] = f"{base_content}\n{continuation_content}"
+    else:
+        base_message["content"] = f"{base_content}{continuation_content}"
+
+    base_response["done"] = continuation_response.get("done", base_response.get("done"))
+    base_response["done_reason"] = continuation_response.get("done_reason", base_response.get("done_reason"))
+    base_response["eval_count"] = base_response.get("eval_count", 0) + continuation_response.get("eval_count", 0)
+    base_response["eval_duration"] = base_response.get("eval_duration", 0) + continuation_response.get("eval_duration", 0)
+    base_response["total_duration"] = base_response.get("total_duration", 0) + continuation_response.get("total_duration", 0)
+    return base_response
+
+
+def _post_ollama_chat(payload: dict, stream: bool):
+    return requests.post(
+        f"{OLLAMA_URL}/api/chat",
+        json=payload,
+        stream=stream,
+        timeout=120
+    )
+
+
+def _complete_non_stream_chat(payload: dict, task_mode: str) -> dict:
+    current_payload = deepcopy(payload)
+    current_payload["stream"] = False
+    response = _post_ollama_chat(current_payload, stream=False)
+
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail=response.text)
+
+    response_json = response.json()
+    for _ in range(MAX_CODING_CONTINUATIONS):
+        if not _should_continue_coding_response(task_mode, response_json):
+            break
+
+        continuation_payload = _build_continuation_payload(current_payload, response_json.get("message", {}).get("content", ""))
+        continuation_response = _post_ollama_chat(continuation_payload, stream=False)
+        if continuation_response.status_code != 200:
+            break
+
+        continuation_json = continuation_response.json()
+        response_json = _merge_response_content(response_json, continuation_json)
+        current_payload = continuation_payload
+
+    return response_json
+
+
+def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str):
+    current_payload = deepcopy(payload)
+    current_payload["stream"] = True
+    final_response_json = {}
+    full_response_parts = []
+
+    for _ in range(MAX_CODING_CONTINUATIONS + 1):
+        response = _post_ollama_chat(current_payload, stream=True)
+        if response.status_code != 200:
+            raise HTTPException(status_code=response.status_code, detail=response.text)
+
+        current_content_parts = []
+        response_json = {}
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+
+            decoded_line = line.decode("utf-8")
+            try:
+                parsed = json.loads(decoded_line)
+                content = parsed.get("message", {}).get("content", "")
+                if content:
+                    current_content_parts.append(content)
+                    full_response_parts.append(content)
+                response_json = parsed
+            except json.JSONDecodeError:
+                pass
+
+            yield decoded_line + "\n"
+
+        if final_response_json:
+            final_response_json = _merge_response_content(final_response_json, response_json)
+        else:
+            final_response_json = response_json
+
+        if not _should_continue_coding_response(task_mode, response_json):
+            break
+
+        current_payload = _build_continuation_payload(current_payload, "".join(current_content_parts))
+        current_payload["stream"] = True
+
+    _persist_completed_chat(
+        session_id,
+        str(payload.get("model", "")),
+        task_mode,
+        list(payload.get("messages", [])),
+        "".join(full_response_parts),
+    )
+
+@app.post("/api/chat")
+def chat(payload: dict = Body(...)):
+    model, session_id, _, _ = _normalize_session_payload(payload)
+    payload.pop("session_id", None)
+    _run_pending_summaries(session_id)
+    apply_gpu_defaults(payload)
+    _apply_document_chat_defaults(payload)
+    task_mode = apply_task_mode(payload)
+    inject_memory_context(payload)
+
+    # 1. Check if Web Search is requested
+    web_search_enabled = _search_requested(payload)
+    search_used = _inject_search_context(payload, web_search_enabled)
+                    
+    # 2. Forward request to Ollama
+    stream = payload.get("stream", False)
+    try:
+        if stream:
+            def generate_stream():
+                yield _search_status_line(search_used)
+                for line in _stream_chat_chunks(payload, task_mode, session_id):
+                    yield line
+            return StreamingResponse(generate_stream(), media_type="application/x-ndjson")
+        else:
+            response_json = _complete_non_stream_chat(payload, task_mode)
+            response_json["search_used"] = search_used
+            _persist_completed_chat(
+                session_id,
+                model,
+                task_mode,
+                list(payload.get("messages", [])),
+                str(response_json.get("message", {}).get("content", "")),
+            )
+            return response_json
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=503, detail=f"Ollama connection error: {e}")
+
+
+@app.post("/api/chat/end")
+def end_chat(payload: dict = Body(...)):
+    model, session_id, messages, task_mode = _normalize_session_payload(payload)
+
+    try:
+        session_payload = load_active_session(session_id) or {
+            "session_id": session_id,
+            "model": model,
+            "task_mode": task_mode,
+            "messages": messages,
+        }
+        result = finalize_session(session_payload, OLLAMA_URL)
+        return {
+            "session_id": session_id,
+            "summary": result["summary"],
+            "session_file": str(result["archive_path"]),
+            "memory_file": str(result["memory_path"]),
+        }
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=503, detail=f"Ollama connection error: {e}")
