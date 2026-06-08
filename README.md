@@ -28,6 +28,38 @@ Docker-based local AI chat studio with Ollama, a FastAPI gateway, a browser UI, 
 - Persistent chat memory with idle-session summaries and future prompt injection.
 - Optional skill markdown injection from `backend/skill/*.md`.
 
+## Feature Screenshots
+
+### Web Overview and Model Management
+
+![Web overview with model pull and delete support](images/6.png)
+
+The web UI supports local chat, active model selection, pulling new Ollama models, and deleting installed models.
+
+### OCR for Images and PDFs
+
+![OCR support for image and PDF uploads](images/7.png)
+
+The app supports OCR for image and PDF uploads, then sends the extracted context to the selected model.
+
+### File Context Summarization
+
+![Summarizing uploaded file context](images/8.png)
+
+Uploaded files can be summarized or analyzed using their extracted text context.
+
+### Web Search and Data Summarization
+
+![Searching and summarizing external data](images/9.png)
+
+The app can search for external information, combine relevant results, and summarize the data for the selected model.
+
+### Runtime Configuration
+
+![Runtime configuration modal](images/4.png)
+
+The project is driven by runtime configuration, including model defaults, OCR settings, web search, and task-mode behavior.
+
 ## Architecture
 
 - `ollama`: local model server and model storage.
