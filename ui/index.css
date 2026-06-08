@@ -931,6 +931,46 @@ textarea:focus {
     color: #ff7675;
 }
 
+.original-image-preview {
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.18);
+}
+
+.original-image-preview img {
+    display: block;
+    width: 100%;
+    max-height: 320px;
+    object-fit: contain;
+    background:
+        linear-gradient(45deg, rgba(255, 255, 255, 0.04) 25%, transparent 25%),
+        linear-gradient(-45deg, rgba(255, 255, 255, 0.04) 25%, transparent 25%),
+        rgba(0, 0, 0, 0.22);
+    background-size: 18px 18px;
+}
+
+.original-image-preview figcaption {
+    padding: 8px 10px;
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    border-top: 1px solid var(--border);
+}
+
+.original-image-preview.message {
+    margin-top: 10px;
+}
+
+.message.user .original-image-preview.message {
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(0, 0, 0, 0.16);
+}
+
 .upload-progress {
     width: 100%;
     min-width: 0;

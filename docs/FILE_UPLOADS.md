@@ -26,6 +26,7 @@
 - The legacy PDF extractor reads embedded text page by page and uses PyMuPDF + Tesseract OCR only for pages with no embedded text.
 - Excel files are converted into plain text with sheet names and row values.
 - JPG, JPEG, and PNG image files are converted into text before being sent to the model.
+- Image uploads show the original image preview in the chat message after send.
 - Image OCR uses Qwen-VL first when `ocr_engine` is `auto` or `qwen_vl`, then falls back to Tesseract if the vision model fails.
 - Uploaded file content is wrapped into the final prompt sent to the model.
 - Uploaded-file chats are isolated from previous chat turns and stored memory summaries; the model should answer from the uploaded file plus the current prompt only.

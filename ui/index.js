@@ -49,6 +49,17 @@ let statusRefreshTimer = null;
 let appConfig = null;
 let uploadStatusTimer = null;
 
+function isImageUpload(file) {
+    return Boolean(file?.type?.startsWith("image/")) || /\.(jpe?g|png)$/i.test(String(file?.name || ""));
+}
+
+function revokeImagePreviewUrl(file) {
+    if (file?.imagePreviewUrl) {
+        URL.revokeObjectURL(file.imagePreviewUrl);
+        file.imagePreviewUrl = "";
+    }
+}
+
 // Auto-resize textarea
 chatInput.addEventListener("input", function() {
     resizeChatInput(this);
@@ -358,6 +369,18 @@ function setGeneratingStatus() {
     statusText.textContent = "Ollama: Preparing...";
 }
 
+function startTaskModeDetectionStatus() {
+    const startedAt = Date.now();
+    const renderStatus = () => {
+        const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+        statusDot.className = "status-dot loading";
+        statusText.textContent = window.getTaskModeDetectionStatusMessage(elapsedSeconds);
+    };
+    renderStatus();
+    const timer = setInterval(renderStatus, 1000);
+    return () => clearInterval(timer);
+}
+
 function resizeChatInput(element) {
     element.style.height = "auto";
     element.style.height = `${window.getTextareaHeight(element.scrollHeight)}px`;
@@ -379,8 +402,10 @@ async function handleFileUpload(e) {
     // Visual upload state
     attachButton.disabled = true;
     attachButton.innerHTML = "⏳";
+    revokeImagePreviewUrl(attachedFile);
     attachedFile = null;
     startUploadStatus(file.name);
+    const imagePreviewUrl = isImageUpload(file) ? URL.createObjectURL(file) : "";
     
     const formData = new FormData();
     formData.append("file", file);
@@ -404,7 +429,9 @@ async function handleFileUpload(e) {
             ocrEngineUsed: data.ocr_engine_used,
             ocrModel: data.ocr_model,
             ocrFallbackFrom: data.ocr_fallback_from,
-            ocrFallbackReason: data.ocr_fallback_reason
+            ocrFallbackReason: data.ocr_fallback_reason,
+            imagePreviewUrl,
+            isImage: Boolean(imagePreviewUrl)
         };
         
         renderAttachmentChip(attachedFile);
@@ -414,6 +441,9 @@ async function handleFileUpload(e) {
         
     } catch (err) {
         console.error(err);
+        if (imagePreviewUrl) {
+            URL.revokeObjectURL(imagePreviewUrl);
+        }
         clearUploadStatus();
         alert(`Error reading file: ${err.message}`);
     } finally {
@@ -523,18 +553,34 @@ function getExtractionLabel(file) {
 
 function renderAttachmentChip(file) {
     const name = file?.name || "Attached file";
+    const imagePreview = renderOriginalImagePreview(file, "input");
     attachmentContainer.innerHTML = `
         <div class="attachment-chip">
-            <span class="attachment-icon">📄</span>
+            <span class="attachment-icon">${file?.isImage ? "🖼️" : "📄"}</span>
             <span class="attachment-name">${escapeHtml(name)}</span>
             <button class="remove-btn" onclick="removeAttachment()">&times;</button>
         </div>
+        ${imagePreview}
         ${renderExtractionPreview(file, "input")}
     `;
     attachmentContainer.style.display = "flex";
 }
 
+function renderOriginalImagePreview(file, mode = "input") {
+    if (!file?.isImage || !file?.imagePreviewUrl) {
+        return "";
+    }
+    const releaseHandler = mode === "message" ? ' onload="URL.revokeObjectURL(this.src)" onerror="URL.revokeObjectURL(this.src)"' : "";
+    return `
+        <figure class="original-image-preview ${mode}">
+            <img src="${escapeHtml(file.imagePreviewUrl)}" alt="Original uploaded image: ${escapeHtml(file.name || "image")}"${releaseHandler}>
+            <figcaption>Original image</figcaption>
+        </figure>
+    `;
+}
+
 window.removeAttachment = function() {
+    revokeImagePreviewUrl(attachedFile);
     attachedFile = null;
     stopUploadStatusTimer();
     attachmentContainer.innerHTML = "";
@@ -779,10 +825,12 @@ function appendMessage(role, content, attachedFileName = null, fileExtraction = 
     if (role === "user") {
         let innerHTML = "";
         if (attachedFileName) {
-            innerHTML += `<div style="font-weight: 500; font-size: 0.8rem; padding: 6px 10px; background: rgba(255,255,255,0.15); border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 8px;">📄 ${escapeHtml(attachedFileName)}</div><br>`;
+            const icon = fileExtraction?.isImage ? "🖼️" : "📄";
+            innerHTML += `<div style="font-weight: 500; font-size: 0.8rem; padding: 6px 10px; background: rgba(255,255,255,0.15); border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 8px;">${icon} ${escapeHtml(attachedFileName)}</div><br>`;
         }
         innerHTML += `<p>${escapeHtml(content).replace(/\n/g, "<br>")}</p>`;
         if (fileExtraction) {
+            innerHTML += renderOriginalImagePreview(fileExtraction, "message");
             innerHTML += renderExtractionPreview(fileExtraction, "message");
         }
         bubble.innerHTML = innerHTML;
@@ -840,8 +888,13 @@ async function handleSend() {
     
     // Construct final user prompt with file text if attached
     const finalPromptContent = window.buildFinalPrompt(text, activeFileName, activeFileText);
-    statusText.textContent = "Ollama: Detecting task mode...";
-    const inferredTaskMode = await window.inferTaskModeForPrompt(finalPromptContent, taskModeSelect.value);
+    const stopTaskModeDetectionStatus = startTaskModeDetectionStatus();
+    let inferredTaskMode;
+    try {
+        inferredTaskMode = await window.inferTaskModeForPrompt(finalPromptContent, taskModeSelect.value);
+    } finally {
+        stopTaskModeDetectionStatus();
+    }
     taskModeSelect.value = inferredTaskMode;
     
     // Add current user prompt to history payload
@@ -853,7 +906,10 @@ async function handleSend() {
     
     // Clear attachment chip and extraction preview immediately on send.
     if (attachedFile) {
-        removeAttachment();
+        attachedFile = null;
+        stopUploadStatusTimer();
+        attachmentContainer.innerHTML = "";
+        attachmentContainer.style.display = "none";
     }
 
     let clearStreamTimers = () => {};

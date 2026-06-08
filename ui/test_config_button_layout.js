@@ -10,8 +10,8 @@ assert.match(html, /id="open-config-button"/);
 assert.match(html, /id="config-modal"/);
 assert.match(html, /id="close-config-button"/);
 assert.match(html, /id="save-config-button"/);
-assert.match(html, /href="index\.css\?v=20260609-1"/);
-assert.match(html, /src="index\.js\?v=20260609-1"/);
+assert.match(html, /href="index\.css\?v=20260609-2"/);
+assert.match(html, /src="index\.js\?v=20260609-4"/);
 assert.doesNotMatch(
     html,
     /<div class="sidebar-section">[\s\S]*<label for="config-editor">Config<\/label>[\s\S]*id="config-editor"[\s\S]*<\/div>/,

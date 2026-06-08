@@ -1,5 +1,16 @@
 const assert = require("node:assert/strict");
-const { TASK_MODE_OPTIONS, getDefaultTaskMode, inferTaskModeFromPrompt, inferTaskModeForPrompt } = require("./task_modes");
+const fs = require("node:fs");
+const path = require("node:path");
+const {
+    TASK_MODE_OPTIONS,
+    getDefaultTaskMode,
+    getTaskModeDetectionStatusMessage,
+    inferTaskModeFromPrompt,
+    inferTaskModeForPrompt,
+} = require("./task_modes");
+
+const indexJs = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
+const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
 
 assert.equal(getDefaultTaskMode(), "general");
 assert.equal(TASK_MODE_OPTIONS.some(option => option.value === "code_writer"), true);
@@ -9,6 +20,14 @@ assert.equal(inferTaskModeFromPrompt("can you explain what an API is?", "general
 assert.equal(inferTaskModeFromPrompt("write python function to add numbers", "code_reviewer"), "code_writer");
 assert.equal(inferTaskModeFromPrompt("if i fall in love with someone how should i do with who i love?", "code_writer"), "general");
 assert.equal(inferTaskModeFromPrompt("", "code_writer"), "code_writer");
+assert.equal(getTaskModeDetectionStatusMessage(0), "Ollama: Detecting task mode...");
+assert.equal(getTaskModeDetectionStatusMessage(8), "Ollama: Still detecting task mode...");
+assert.equal(getTaskModeDetectionStatusMessage(20), "Ollama: Still detecting task mode. The small model may be loading...");
+assert.match(indexJs, /function startTaskModeDetectionStatus\(\)/);
+assert.match(indexJs, /setInterval\(renderStatus, 1000\)/);
+assert.match(indexJs, /stopTaskModeDetectionStatus\(\);/);
+assert.match(indexHtml, /task_modes\.js\?v=20260609-2/);
+assert.match(indexHtml, /index\.js\?v=20260609-4/);
 
 async function runAsyncTests() {
     const modelSelectedMode = await inferTaskModeForPrompt("review this function", "general", async () => ({

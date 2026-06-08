@@ -56,13 +56,31 @@ async function inferTaskModeForPrompt(prompt, currentTaskMode = "general", fetch
     }
 }
 
+function getTaskModeDetectionStatusMessage(elapsedSeconds) {
+    const seconds = Number(elapsedSeconds || 0);
+    if (seconds >= 20) {
+        return "Ollama: Still detecting task mode. The small model may be loading...";
+    }
+    if (seconds >= 8) {
+        return "Ollama: Still detecting task mode...";
+    }
+    return "Ollama: Detecting task mode...";
+}
+
 if (typeof window !== "undefined") {
     window.TASK_MODE_OPTIONS = TASK_MODE_OPTIONS;
     window.getDefaultTaskMode = getDefaultTaskMode;
     window.inferTaskModeFromPrompt = inferTaskModeFromPrompt;
     window.inferTaskModeForPrompt = inferTaskModeForPrompt;
+    window.getTaskModeDetectionStatusMessage = getTaskModeDetectionStatusMessage;
 }
 
 if (typeof module !== "undefined") {
-    module.exports = { TASK_MODE_OPTIONS, getDefaultTaskMode, inferTaskModeFromPrompt, inferTaskModeForPrompt };
+    module.exports = {
+        TASK_MODE_OPTIONS,
+        getDefaultTaskMode,
+        getTaskModeDetectionStatusMessage,
+        inferTaskModeFromPrompt,
+        inferTaskModeForPrompt,
+    };
 }
