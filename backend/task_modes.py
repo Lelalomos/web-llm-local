@@ -21,6 +21,12 @@ TASK_MODE_SYSTEM_PROMPTS = {
 }
 
 
+def _ensure_min_num_predict(options: dict, minimum: int) -> None:
+    current_value = options.get("num_predict")
+    if not isinstance(current_value, int) or current_value < minimum:
+        options["num_predict"] = minimum
+
+
 def apply_task_mode(payload: dict) -> str:
     task_mode = str(payload.pop("task_mode", "general") or "general")
     if task_mode == "general":
@@ -43,10 +49,10 @@ def apply_task_mode(payload: dict) -> str:
 
     options = payload.setdefault("options", {})
     if task_mode == "code_writer":
-        options.setdefault("num_predict", 1200)
+        _ensure_min_num_predict(options, 1600)
     elif task_mode in {"code_editor", "bug_fixer"}:
-        options.setdefault("num_predict", 900)
+        _ensure_min_num_predict(options, 1200)
     elif task_mode == "code_reviewer":
-        options.setdefault("num_predict", 700)
+        _ensure_min_num_predict(options, 900)
 
     return task_mode

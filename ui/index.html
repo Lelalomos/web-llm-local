@@ -11,7 +11,7 @@
     <!-- Highlight.js for Syntax Highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     
-    <link rel="stylesheet" href="index.css?v=20260608-2">
+    <link rel="stylesheet" href="index.css?v=20260609-1">
 </head>
 <body>
     <div class="app-container">
@@ -74,14 +74,9 @@
             </div>
 
             <div class="sidebar-section">
-                <label for="config-editor">Config</label>
-                    <div class="config-editor-panel">
-                        <textarea id="config-editor" class="config-editor" spellcheck="false" placeholder="{ }"></textarea>
-                        <div class="config-editor-actions">
-                            <button id="save-config-button" class="btn btn-primary model-action-btn" type="button">Save</button>
-                        </div>
-                        <div id="config-status" class="model-management-status">Loading config...</div>
-                    </div>
+                <label for="open-config-button">Config</label>
+                <button id="open-config-button" class="btn btn-primary" type="button">Open Config</button>
+                <div id="config-status" class="model-management-status">Loading config...</div>
             </div>
 
             <div class="sidebar-footer">
@@ -128,12 +123,12 @@
                     
                     <div class="input-row">
                         <!-- File Upload Button -->
-                        <button id="attach-button" class="action-btn" type="button" title="Attach Document (PDF, Word, TXT, CSV...)">
+                        <button id="attach-button" class="action-btn" type="button" title="Attach File (PDF, Office, Image, TXT, CSV...)">
                             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </button>
-                        <input type="file" id="file-input" style="display: none;" accept=".pdf,.docx,.txt,.md,.json,.csv" />
+                        <input type="file" id="file-input" style="display: none;" accept=".pdf,.docx,.xlsx,.xls,.txt,.md,.json,.csv,.jpg,.jpeg,.png" />
 
                         <!-- Textarea input -->
                         <textarea id="chat-input" placeholder="Ask Gemma 4 anything... (Press Enter to send, Shift+Enter for new line)" rows="1"></textarea>
@@ -157,21 +152,38 @@
             </footer>
         </main>
     </div>
+
+    <div id="config-modal" class="config-modal" hidden>
+        <div id="config-modal-backdrop" class="config-modal-backdrop"></div>
+        <section class="config-modal-panel" role="dialog" aria-modal="true" aria-labelledby="config-modal-title">
+            <div class="config-modal-header">
+                <div>
+                    <p class="config-modal-eyebrow">Runtime Settings</p>
+                    <h2 id="config-modal-title">App Config</h2>
+                </div>
+                <button id="close-config-button" class="config-modal-close" type="button" title="Close config">✕</button>
+            </div>
+            <textarea id="config-editor" class="config-editor" spellcheck="false" placeholder="{ }"></textarea>
+            <div class="config-editor-actions">
+                <button id="save-config-button" class="btn btn-primary model-action-btn" type="button">Save Config</button>
+            </div>
+        </section>
+    </div>
     
     <!-- Highlight.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="chat_session.js?v=20260608-3"></script>
-    <script src="layout_state.js?v=20260608-3"></script>
-    <script src="markdown_renderer.js?v=20260608-3"></script>
-    <script src="model_management.js?v=20260608-3"></script>
-    <script src="model_selection.js?v=20260608-3"></script>
-    <script src="config_editor.js?v=20260608-3"></script>
-    <script src="document_prompt.js?v=20260608-3"></script>
-    <script src="stream_parser.js?v=20260608-3"></script>
-    <script src="task_modes.js?v=20260608-3"></script>
-    <script src="textarea_sizing.js?v=20260608-3"></script>
-    <script src="web_search_state.js?v=20260608-3"></script>
-    <script src="api_client.js?v=20260608-3"></script>
-    <script src="index.js?v=20260608-3"></script>
+    <script src="chat_session.js?v=20260609-1"></script>
+    <script src="layout_state.js?v=20260609-1"></script>
+    <script src="markdown_renderer.js?v=20260609-2"></script>
+    <script src="model_management.js?v=20260609-1"></script>
+    <script src="model_selection.js?v=20260609-1"></script>
+    <script src="config_editor.js?v=20260609-1"></script>
+    <script src="document_prompt.js?v=20260609-1"></script>
+    <script src="stream_parser.js?v=20260609-1"></script>
+    <script src="task_modes.js?v=20260609-1"></script>
+    <script src="textarea_sizing.js?v=20260609-1"></script>
+    <script src="web_search_state.js?v=20260609-1"></script>
+    <script src="api_client.js?v=20260609-1"></script>
+    <script src="index.js?v=20260609-1"></script>
 </body>
 </html>

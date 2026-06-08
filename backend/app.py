@@ -8,10 +8,12 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from chat_memory import finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
 from config_store import load_app_config, save_app_config
-from document_utils import extract_document_text
+from document_utils import extract_document_text_with_metadata
+from intent_router import infer_chat_intent
 from model_bootstrap import DEFAULT_OLLAMA_MODEL, ensure_default_model_available
 from ollama_options import apply_gpu_defaults
 from search_policy import should_auto_search
+from search_enhancer import enhance_search_context
 from skill_loader import ensure_skill_dir, inject_skill_context
 from task_modes import apply_task_mode
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,11 +29,11 @@ app.add_middleware(
 )
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
-CODING_TASK_MODES = {"code_writer", "code_editor", "code_reviewer", "bug_fixer"}
 AUTO_SUMMARY_CHECK_SECONDS = int(os.getenv("CHAT_MEMORY_CHECK_SECONDS", "60"))
-CONTINUE_CODE_PROMPT = (
+CONTINUE_RESPONSE_PROMPT = (
     "Continue from the exact next line of the previous answer. "
-    "Do not repeat prior text. If you were inside a code block, continue that same code block."
+    "Do not repeat prior text. If you were inside a code block, continue that same code block. "
+    "If the previous answer was prose, continue the same answer naturally."
 )
 summary_worker_stop_event = threading.Event()
 summary_worker_lock = threading.Lock()
@@ -100,18 +102,19 @@ async def upload_file(file: UploadFile = File(...)):
     content = await file.read()
 
     try:
-        extracted_text, character_count = extract_document_text(filename, content)
+        extracted_text, character_count, extraction_metadata = extract_document_text_with_metadata(filename, content, load_app_config(), OLLAMA_URL)
         return {
             "filename": filename,
             "text": extracted_text,
-            "character_count": character_count
+            "character_count": character_count,
+            **extraction_metadata,
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error parsing file: {e}")
 
-from search_service import execute_web_search
+from search_service import build_direct_url_context, execute_web_search
 
 
 def _apply_default_model(payload: dict, app_config: dict) -> None:
@@ -139,7 +142,7 @@ def _apply_config_defaults(payload: dict, app_config: dict) -> None:
         options.setdefault(key, value)
 
 
-def _search_requested(payload: dict, app_config: dict) -> bool:
+def _search_requested(payload: dict, app_config: dict, task_mode: str = "general", direct_context_used: bool = False) -> bool:
     search_mode = payload.pop("web_search_mode", None)
     legacy_web_search = payload.pop("web_search", None)
 
@@ -149,6 +152,12 @@ def _search_requested(payload: dict, app_config: dict) -> bool:
         return False
     if isinstance(legacy_web_search, bool):
         return legacy_web_search
+    if direct_context_used:
+        return False
+    if _is_document_prompt(payload):
+        return False
+    if task_mode in {"code_writer", "code_editor", "bug_fixer"}:
+        return False
 
     default_search_mode = app_config.get("default_web_search_mode", "auto")
     if default_search_mode == "on":
@@ -164,11 +173,20 @@ def _search_requested(payload: dict, app_config: dict) -> bool:
     if latest_message.get("role") != "user":
         return False
 
-    return should_auto_search(latest_message.get("content", ""))
+    latest_content = str(latest_message.get("content", ""))
+    inferred_intent = infer_chat_intent(OLLAMA_URL, latest_content, task_mode, app_config)
+    inferred_web_search = bool(inferred_intent.get("web_search", should_auto_search(latest_content)))
+    if inferred_web_search and inferred_intent.get("search_query"):
+        payload["_web_search_query"] = inferred_intent["search_query"]
+    return inferred_web_search
 
 
 def _search_status_line(search_used: bool) -> str:
     return json.dumps({"type": "search_status", "search_used": search_used}) + "\n"
+
+
+def _stream_error_line(message: str) -> str:
+    return json.dumps({"type": "stream_error", "message": message}) + "\n"
 
 
 def _is_document_prompt(payload: dict) -> bool:
@@ -186,6 +204,11 @@ def _is_document_prompt(payload: dict) -> bool:
 
 def _apply_document_chat_defaults(payload: dict) -> None:
     if _is_document_prompt(payload) and "think" not in payload:
+        payload["think"] = False
+
+
+def _apply_thinking_defaults(payload: dict) -> None:
+    if "think" not in payload:
         payload["think"] = False
 
 
@@ -261,8 +284,11 @@ def _inject_search_context(payload: dict, web_search_enabled: bool, app_config: 
     if latest_message.get("role") != "user":
         return False
 
-    query = latest_message.get("content", "")
-    search_context, _ = execute_web_search(query)
+    query = payload.pop("_web_search_query", None) or latest_message.get("content", "")
+    search_context, search_results = execute_web_search(query, app_config)
+    search_context, enhanced, enhancer_model = enhance_search_context(OLLAMA_URL, str(query), search_context, search_results, app_config)
+    if enhanced:
+        print(f"[Search Service] Enhanced search context with small model: {enhancer_model}")
     max_chars = int(app_config.get("web_search_context_max_chars", 0) or 0)
     if max_chars > 0 and len(search_context) > max_chars:
         search_context = search_context[:max_chars].rstrip() + "\n\n[Web search context truncated to fit config limits.]"
@@ -285,19 +311,61 @@ def _inject_search_context(payload: dict, web_search_enabled: bool, app_config: 
     return True
 
 
-def _should_continue_response(task_mode: str, search_used: bool, response_json: dict) -> bool:
-    if task_mode not in CODING_TASK_MODES and not search_used:
+@app.post("/api/task-mode/infer")
+def infer_task_mode(payload: dict = Body(...)):
+    app_config = load_app_config()
+    prompt = str(payload.get("prompt", "")).strip()
+    current_task_mode = str(payload.get("current_task_mode", "general")).strip() or "general"
+    intent = infer_chat_intent(OLLAMA_URL, prompt, current_task_mode, app_config)
+    return {
+        "task_mode": intent["task_mode"],
+        "web_search": bool(intent.get("web_search", False)),
+        "search_query": str(intent.get("search_query", "")),
+        "source": intent.get("source", "fallback"),
+    }
+
+
+def _inject_direct_url_context(payload: dict, app_config: dict) -> bool:
+    messages = payload.get("messages") or []
+    if not messages:
         return False
 
+    latest_message = messages[-1]
+    if latest_message.get("role") != "user":
+        return False
+
+    max_chars = int(app_config.get("web_search_context_max_chars", 0) or 0)
+    website_context, used_urls = build_direct_url_context(str(latest_message.get("content", "")), max_chars)
+    if not website_context:
+        return False
+
+    url_context_prompt = (
+        "Use the following Website Context from the exact URL(s) provided by the user. "
+        "Prefer this direct page context over general web search snippets. "
+        "Cite the URL(s) when referencing page content.\n\n"
+        f"{website_context}"
+    )
+
+    for message in payload.get("messages", []):
+        if message.get("role") == "system":
+            message["content"] = f"{message.get('content', '')}\n\n{url_context_prompt}".strip()
+            return True
+
+    payload.setdefault("messages", []).insert(0, {"role": "system", "content": url_context_prompt})
+    return bool(used_urls)
+
+
+def _should_continue_response(task_mode: str, search_used: bool, response_json: dict, assistant_content: str = "") -> bool:
     message = response_json.get("message", {})
-    return response_json.get("done_reason") == "length" and bool(message.get("content", ""))
+    response_content = assistant_content or message.get("content", "")
+    return response_json.get("done_reason") == "length" and bool(response_content)
 
 
 def _build_continuation_payload(payload: dict, assistant_content: str) -> dict:
     continuation_payload = deepcopy(payload)
     continuation_payload["messages"] = list(continuation_payload.get("messages", [])) + [
         {"role": "assistant", "content": assistant_content},
-        {"role": "user", "content": CONTINUE_CODE_PROMPT},
+        {"role": "user", "content": CONTINUE_RESPONSE_PROMPT},
     ]
     continuation_payload["stream"] = False
     return continuation_payload
@@ -392,7 +460,7 @@ def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str, search_u
         else:
             final_response_json = response_json
 
-        if not _should_continue_response(task_mode, search_used, response_json):
+        if not _should_continue_response(task_mode, search_used, response_json, "".join(current_content_parts)):
             break
 
         current_payload = _build_continuation_payload(current_payload, "".join(current_content_parts))
@@ -412,17 +480,22 @@ def chat(payload: dict = Body(...)):
     _apply_default_model(payload, app_config)
     model, session_id, _, _ = _normalize_session_payload(payload)
     payload.pop("session_id", None)
-    _run_pending_summaries(session_id)
     _apply_config_defaults(payload, app_config)
     apply_gpu_defaults(payload)
+    is_document_prompt = _is_document_prompt(payload)
+    if not is_document_prompt:
+        _run_pending_summaries(session_id)
     _apply_document_chat_defaults(payload)
+    _apply_thinking_defaults(payload)
     task_mode = apply_task_mode(payload)
-    inject_memory_context(payload)
-    if app_config.get("skill_markdown_enabled", True):
+    if not is_document_prompt:
+        inject_memory_context(payload)
+    if not is_document_prompt and app_config.get("skill_markdown_enabled", True):
         inject_skill_context(payload, int(app_config.get("skill_prompt_max_chars", 0) or 0))
 
     # 1. Check if Web Search is requested
-    web_search_enabled = _search_requested(payload, app_config)
+    direct_context_used = _inject_direct_url_context(payload, app_config)
+    web_search_enabled = _search_requested(payload, app_config, task_mode, direct_context_used)
     search_used = _inject_search_context(payload, web_search_enabled, app_config)
     max_continuations = int(app_config.get("chat_max_continuations", 0) or 0)
                     
@@ -432,8 +505,13 @@ def chat(payload: dict = Body(...)):
         if stream:
             def generate_stream():
                 yield _search_status_line(search_used)
-                for line in _stream_chat_chunks(payload, task_mode, session_id, search_used, max_continuations):
-                    yield line
+                try:
+                    for line in _stream_chat_chunks(payload, task_mode, session_id, search_used, max_continuations):
+                        yield line
+                except requests.exceptions.RequestException as e:
+                    yield _stream_error_line(f"Ollama connection error: {e}")
+                except HTTPException as e:
+                    yield _stream_error_line(str(e.detail))
             return StreamingResponse(generate_stream(), media_type="application/x-ndjson")
         else:
             response_json = _complete_non_stream_chat(payload, task_mode, search_used, max_continuations)

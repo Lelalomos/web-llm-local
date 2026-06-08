@@ -19,6 +19,10 @@ const pullModelButton = document.getElementById("pull-model-button");
 const modelDeleteSelect = document.getElementById("model-delete-select");
 const deleteModelButton = document.getElementById("delete-model-button");
 const modelManagementStatus = document.getElementById("model-management-status");
+const openConfigButton = document.getElementById("open-config-button");
+const configModal = document.getElementById("config-modal");
+const configModalBackdrop = document.getElementById("config-modal-backdrop");
+const closeConfigButton = document.getElementById("close-config-button");
 const configEditor = document.getElementById("config-editor");
 const saveConfigButton = document.getElementById("save-config-button");
 const configStatus = document.getElementById("config-status");
@@ -28,6 +32,8 @@ const attachButton = document.getElementById("attach-button");
 const fileInput = document.getElementById("file-input");
 const attachmentContainer = document.getElementById("attachment-container");
 const webSearchToggle = document.getElementById("web-search-toggle");
+const STREAM_STALL_WARNING_MS = 15000;
+const STREAM_IDLE_ABORT_MS = 180000;
 
 let chatHistory = [];
 let isGenerating = false;
@@ -35,10 +41,13 @@ let attachedFile = null; // Store { name: string, text: string, charCount: numbe
 let isWebSearchActive = true;
 let currentModel = "";
 let onlineModelCount = 0;
-let currentSessionId = window.createChatSessionId();
+let currentSessionId = typeof window.createChatSessionId === "function"
+    ? window.createChatSessionId()
+    : `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 let isManagingModels = false;
 let statusRefreshTimer = null;
 let appConfig = null;
+let uploadStatusTimer = null;
 
 // Auto-resize textarea
 chatInput.addEventListener("input", function() {
@@ -47,6 +56,7 @@ chatInput.addEventListener("input", function() {
 
 // Init
 window.addEventListener("DOMContentLoaded", async () => {
+    setupConfigModalEventListeners();
     setupEventListeners();
     taskModeSelect.value = window.getDefaultTaskMode();
     await loadConfigFromServer();
@@ -141,7 +151,24 @@ function setupEventListeners() {
     sidebarToggleButton.addEventListener("click", openSidebar);
     sidebarCloseButton.addEventListener("click", closeSidebar);
     sidebarBackdrop.addEventListener("click", closeSidebar);
+    window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !configModal.hidden) {
+            closeConfigModal();
+        }
+    });
     window.addEventListener("resize", handleViewportChange);
+}
+
+function setupConfigModalEventListeners() {
+    if (openConfigButton) {
+        openConfigButton.addEventListener("click", openConfigModal);
+    }
+    if (closeConfigButton) {
+        closeConfigButton.addEventListener("click", closeConfigModal);
+    }
+    if (configModalBackdrop) {
+        configModalBackdrop.addEventListener("click", closeConfigModal);
+    }
 }
 
 function syncWebSearchToggle() {
@@ -171,6 +198,28 @@ function setModelManagementStatus(message) {
 
 function setConfigStatus(message) {
     configStatus.textContent = message;
+}
+
+function openConfigModal() {
+    if (!configModal) {
+        return;
+    }
+    configModal.hidden = false;
+    document.body.classList.add("config-modal-open");
+    if (configEditor) {
+        configEditor.focus();
+    }
+}
+
+function closeConfigModal() {
+    if (!configModal) {
+        return;
+    }
+    configModal.hidden = true;
+    document.body.classList.remove("config-modal-open");
+    if (openConfigButton) {
+        openConfigButton.focus();
+    }
 }
 
 function applyConfigToUi(config) {
@@ -330,6 +379,8 @@ async function handleFileUpload(e) {
     // Visual upload state
     attachButton.disabled = true;
     attachButton.innerHTML = "⏳";
+    attachedFile = null;
+    startUploadStatus(file.name);
     
     const formData = new FormData();
     formData.append("file", file);
@@ -349,18 +400,24 @@ async function handleFileUpload(e) {
         attachedFile = {
             name: data.filename,
             text: data.text,
-            charCount: data.character_count
+            charCount: data.character_count,
+            ocrEngineUsed: data.ocr_engine_used,
+            ocrModel: data.ocr_model,
+            ocrFallbackFrom: data.ocr_fallback_from,
+            ocrFallbackReason: data.ocr_fallback_reason
         };
         
-        renderAttachmentChip(file.name);
+        renderAttachmentChip(attachedFile);
         if (window.shouldCloseSidebarAfterAction(window.innerWidth)) {
             closeSidebar();
         }
         
     } catch (err) {
         console.error(err);
+        clearUploadStatus();
         alert(`Error reading file: ${err.message}`);
     } finally {
+        stopUploadStatusTimer();
         attachButton.disabled = false;
         attachButton.innerHTML = `
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -371,19 +428,115 @@ async function handleFileUpload(e) {
     }
 }
 
-function renderAttachmentChip(name) {
+function getUploadStatusMessage(elapsedSeconds) {
+    if (elapsedSeconds >= 30) {
+        return "Still working. OCR/model extraction can take a while for scanned or complex PDFs.";
+    }
+    if (elapsedSeconds >= 8) {
+        return "Still working. Extracting text and checking whether OCR is needed.";
+    }
+    return "Extracting file text...";
+}
+
+function renderUploadStatus(fileName, elapsedSeconds = 0) {
+    attachmentContainer.innerHTML = `
+        <div class="upload-progress">
+            <div class="upload-progress-header">
+                <span class="upload-spinner" aria-hidden="true"></span>
+                <div>
+                    <div class="upload-progress-title">${escapeHtml(fileName)}</div>
+                    <div class="upload-progress-message">${escapeHtml(getUploadStatusMessage(elapsedSeconds))}</div>
+                </div>
+                <span class="upload-progress-time">${elapsedSeconds}s</span>
+            </div>
+        </div>
+    `;
+    attachmentContainer.style.display = "flex";
+}
+
+function stopUploadStatusTimer() {
+    if (uploadStatusTimer) {
+        clearInterval(uploadStatusTimer);
+        uploadStatusTimer = null;
+    }
+}
+
+function clearUploadStatus() {
+    stopUploadStatusTimer();
+    if (!attachedFile) {
+        attachmentContainer.innerHTML = "";
+        attachmentContainer.style.display = "none";
+    }
+}
+
+function startUploadStatus(fileName) {
+    const startedAt = Date.now();
+    stopUploadStatusTimer();
+    renderUploadStatus(fileName, 0);
+    uploadStatusTimer = setInterval(() => {
+        const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+        renderUploadStatus(fileName, elapsedSeconds);
+    }, 1000);
+}
+
+function getExtractionPreviewText(file, maxChars = 8000) {
+    const text = String(file?.text || "").trim();
+    if (!text) {
+        return "No extractable text was found.";
+    }
+    if (text.length <= maxChars) {
+        return text;
+    }
+    return `${text.slice(0, maxChars).trim()}\n\n[Extraction preview truncated.]`;
+}
+
+function renderExtractionPreview(file, mode = "input") {
+    const previewText = getExtractionPreviewText(file, mode === "message" ? 10000 : 5000);
+    const characterCount = Number(file?.charCount || 0).toLocaleString();
+    const extractionLabel = getExtractionLabel(file);
+    return `
+        <details class="extraction-preview ${mode}" ${mode === "message" ? "" : "open"}>
+            <summary>
+                <span>Original extraction</span>
+                <span class="extraction-meta">${escapeHtml(extractionLabel)} · ${characterCount} chars</span>
+            </summary>
+            <pre>${escapeHtml(previewText)}</pre>
+        </details>
+    `;
+}
+
+function getExtractionLabel(file) {
+    const engine = String(file?.ocrEngineUsed || "").trim();
+    const model = String(file?.ocrModel || "").trim();
+    const fallbackFrom = String(file?.ocrFallbackFrom || "").trim();
+    if (engine === "qwen_vl") {
+        return model ? `Qwen-VL: ${model}` : "Qwen-VL";
+    }
+    if (engine === "tesseract" && fallbackFrom) {
+        return `Tesseract fallback from ${fallbackFrom}`;
+    }
+    if (engine) {
+        return engine;
+    }
+    return "extracted";
+}
+
+function renderAttachmentChip(file) {
+    const name = file?.name || "Attached file";
     attachmentContainer.innerHTML = `
         <div class="attachment-chip">
             <span class="attachment-icon">📄</span>
             <span class="attachment-name">${escapeHtml(name)}</span>
             <button class="remove-btn" onclick="removeAttachment()">&times;</button>
         </div>
+        ${renderExtractionPreview(file, "input")}
     `;
     attachmentContainer.style.display = "flex";
 }
 
 window.removeAttachment = function() {
     attachedFile = null;
+    stopUploadStatusTimer();
     attachmentContainer.innerHTML = "";
     attachmentContainer.style.display = "none";
 };
@@ -606,7 +759,7 @@ function highlightCodeBlocks(container) {
 }
 
 // Append message block to container with optional file name indicator
-function appendMessage(role, content, attachedFileName = null) {
+function appendMessage(role, content, attachedFileName = null, fileExtraction = null) {
     // Remove welcome card if it's the first message
     const welcome = messagesContainer.querySelector(".welcome-card");
     if (welcome) {
@@ -629,6 +782,9 @@ function appendMessage(role, content, attachedFileName = null) {
             innerHTML += `<div style="font-weight: 500; font-size: 0.8rem; padding: 6px 10px; background: rgba(255,255,255,0.15); border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; margin-bottom: 8px;">📄 ${escapeHtml(attachedFileName)}</div><br>`;
         }
         innerHTML += `<p>${escapeHtml(content).replace(/\n/g, "<br>")}</p>`;
+        if (fileExtraction) {
+            innerHTML += renderExtractionPreview(fileExtraction, "message");
+        }
         bubble.innerHTML = innerHTML;
     } else {
         bubble.innerHTML = renderMarkdown(content);
@@ -661,10 +817,11 @@ async function handleSend() {
     
     const activeFileName = attachedFile ? attachedFile.name : null;
     const activeFileText = attachedFile ? attachedFile.text : null;
+    const activeFile = attachedFile ? { ...attachedFile } : null;
     
     // Add user message to UI (with document badge if applicable)
     const userVisiblePrompt = text || window.DEFAULT_DOCUMENT_PROMPT;
-    appendMessage("user", userVisiblePrompt, activeFileName);
+    appendMessage("user", userVisiblePrompt, activeFileName, activeFile);
     closeSidebar();
     
     // Prepare conversation messages payload
@@ -676,11 +833,16 @@ async function handleSend() {
         apiMessages.push({ role: "system", content: systemInstruction });
     }
     
-    // Build from chat history
-    chatHistory.forEach(msg => apiMessages.push(msg));
+    // Uploaded-file prompts are isolated from prior chat turns.
+    if (!activeFile) {
+        chatHistory.forEach(msg => apiMessages.push(msg));
+    }
     
     // Construct final user prompt with file text if attached
     const finalPromptContent = window.buildFinalPrompt(text, activeFileName, activeFileText);
+    statusText.textContent = "Ollama: Detecting task mode...";
+    const inferredTaskMode = await window.inferTaskModeForPrompt(finalPromptContent, taskModeSelect.value);
+    taskModeSelect.value = inferredTaskMode;
     
     // Add current user prompt to history payload
     apiMessages.push({ role: "user", content: finalPromptContent });
@@ -689,14 +851,45 @@ async function handleSend() {
     const assistantBubble = appendMessage("assistant", "Preparing...");
     setGeneratingStatus();
     
-    // Clear attachment chip immediately on send
+    // Clear attachment chip and extraction preview immediately on send.
     if (attachedFile) {
         removeAttachment();
     }
+
+    let clearStreamTimers = () => {};
     
     try {
+        const abortController = new AbortController();
+        let streamIdleTimer = null;
+        let streamWarningTimer = null;
+
+        clearStreamTimers = () => {
+            if (streamIdleTimer) {
+                clearTimeout(streamIdleTimer);
+                streamIdleTimer = null;
+            }
+            if (streamWarningTimer) {
+                clearTimeout(streamWarningTimer);
+                streamWarningTimer = null;
+            }
+        };
+
+        const resetStreamTimers = () => {
+            clearStreamTimers();
+            streamWarningTimer = setTimeout(() => {
+                if (!abortController.signal.aborted) {
+                    assistantBubble.innerHTML = renderMarkdown("Still working...");
+                }
+            }, STREAM_STALL_WARNING_MS);
+            streamIdleTimer = setTimeout(() => {
+                abortController.abort();
+            }, STREAM_IDLE_ABORT_MS);
+        };
+
+        resetStreamTimers();
         const response = await window.fetchApi("/api/chat", {
             method: "POST",
+            signal: abortController.signal,
             headers: {
                 "Content-Type": "application/json"
             },
@@ -705,7 +898,7 @@ async function handleSend() {
                 messages: apiMessages,
                 stream: true,
                 web_search_mode: isWebSearchActive ? "auto" : "off",
-                task_mode: taskModeSelect.value,
+                task_mode: inferredTaskMode,
                 session_id: currentSessionId
             })
         });
@@ -725,6 +918,7 @@ async function handleSend() {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
+            resetStreamTimers();
             
             const chunkText = decoder.decode(value, { stream: true });
 
@@ -742,6 +936,10 @@ async function handleSend() {
                         setGeneratingStatus();
                     }
                     continue;
+                }
+
+                if (parsed.type === "stream_error") {
+                    throw new Error(parsed.message || "Chat stream failed");
                 }
 
                 const word = parsed.message?.content || "";
@@ -776,6 +974,7 @@ async function handleSend() {
         // Save to chat history
         chatHistory.push({ role: "user", content: finalPromptContent });
         chatHistory.push({ role: "assistant", content: fullResponseContent });
+        clearStreamTimers();
 
     } catch (e) {
         const errorMessage = e instanceof Error && e.message
@@ -786,6 +985,7 @@ async function handleSend() {
     } finally {
         isGenerating = false;
         sendButton.disabled = false;
+        clearStreamTimers();
         chatInput.focus();
         resizeChatInput(chatInput);
         setSearchInProgressStatus(false);

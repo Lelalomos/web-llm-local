@@ -30,6 +30,8 @@ services:
     container_name: local-llm-gateway
     environment:
       - OLLAMA_URL=http://ollama:11434
+      - SEARXNG_URL=http://searxng:8080
+      - MEILI_URL=http://meilisearch:7700
       - DEFAULT_OLLAMA_MODEL=${DEFAULT_OLLAMA_MODEL:-gemma2:2b}
       - OLLAMA_FORCE_NUM_GPU=${OLLAMA_FORCE_NUM_GPU:-999}
       - OLLAMA_DEFAULT_NUM_CTX=${OLLAMA_DEFAULT_NUM_CTX:-2048}
@@ -43,11 +45,42 @@ services:
       - OLLAMA_GEMMA_LARGE_NUM_CTX=${OLLAMA_GEMMA_LARGE_NUM_CTX:-1024}
       - OLLAMA_GEMMA_LARGE_NUM_BATCH=${OLLAMA_GEMMA_LARGE_NUM_BATCH:-32}
       - OLLAMA_GEMMA_LARGE_NUM_GPU=${OLLAMA_GEMMA_LARGE_NUM_GPU:-}
+      - PDF_EXTRACTION_MODE=${PDF_EXTRACTION_MODE:-surya_docling}
+      - PDF_SURYA_TIMEOUT_SECONDS=${PDF_SURYA_TIMEOUT_SECONDS:-60}
+      - PDF_FAST_TEXT_MIN_CHARS=${PDF_FAST_TEXT_MIN_CHARS:-1000}
     volumes:
       - ./backend:/app
       - ./test:/test:ro
     depends_on:
       - ollama
+      - searxng
+      - meilisearch
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: local-searxng-service
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    restart: unless-stopped
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    container_name: local-meilisearch-service
+    environment:
+      - MEILI_ENV=development
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - ./meili_data:/meili_data
     restart: unless-stopped
 
   web-ui:

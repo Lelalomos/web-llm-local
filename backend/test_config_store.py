@@ -23,7 +23,26 @@ class ConfigStoreTests(unittest.TestCase):
                 "skill_markdown_enabled": False,
                 "skill_prompt_max_chars": 1000,
                 "web_search_context_max_chars": 2000,
+                "search_provider": "searxng",
+                "searxng_enabled": True,
+                "searxng_url": "http://searxng:8080",
+                "searxng_timeout_seconds": 8,
+                "meilisearch_enabled": True,
+                "meilisearch_url": "http://meilisearch:7700",
+                "meilisearch_index": "web_search_results",
+                "meilisearch_timeout_seconds": 3,
                 "chat_max_continuations": 1,
+                "task_mode_interpreter_enabled": True,
+                "task_mode_interpreter_model": "qwen2.5:0.5b",
+                "task_mode_interpreter_timeout_seconds": 8,
+                "search_context_enhancer_enabled": True,
+                "search_context_enhancer_model": "qwen2.5:0.5b",
+                "search_context_enhancer_timeout_seconds": 45,
+                "search_context_enhancer_max_chars": 6000,
+                "ocr_engine": "qwen_vl",
+                "vision_ocr_model": "qwen3-vl:latest",
+                "vision_ocr_timeout_seconds": 120,
+                "vision_ocr_prompt": "Extract text",
                 "default_options": {"num_predict": 321},
             }
 
@@ -45,6 +64,10 @@ class ConfigStoreTests(unittest.TestCase):
 
         self.assertEqual(loaded, DEFAULT_APP_CONFIG)
         self.assertEqual(json.loads(stored_text), DEFAULT_APP_CONFIG)
+
+    def test_validate_app_config_rejects_invalid_ocr_engine(self):
+        with self.assertRaisesRegex(Exception, "ocr_engine must be"):
+            validate_app_config({"ocr_engine": "bad_engine"})
 
 
 if __name__ == "__main__":

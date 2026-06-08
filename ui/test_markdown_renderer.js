@@ -23,3 +23,19 @@ assert.equal(looksLikeCodeBlock("This is normal text.\nThis is another sentence.
 
 const heuristicCodeHtml = renderMarkdown("def add(a, b):\n    return a + b\nprint(add(1, 2))");
 assert.equal(heuristicCodeHtml.includes('class="code-container"'), true);
+
+const tableHtml = renderMarkdown("| Description | Quantity | Unit Price | Amount |\n|---|---|---|---|\n| Subscription GLM Coding Pro | | $36.45 | $36.45 |");
+assert.equal(tableHtml.includes('class="markdown-table-wrapper"'), true);
+assert.equal(tableHtml.includes("<th>Description</th>"), true);
+assert.equal(tableHtml.includes("<td>Subscription GLM Coding Pro</td>"), true);
+assert.equal(tableHtml.includes("<td>$36.45</td>"), true);
+
+const fencedTableHtml = renderMarkdown("```code\n| Section | Field/Description | Example Data (from template) |\n| :--- | :--- | :--- |\n| **Invoice Identification** | Invoice Number | (123456) |\n```");
+assert.equal(fencedTableHtml.includes('class="markdown-table-wrapper"'), true);
+assert.equal(fencedTableHtml.includes('class="code-container"'), false);
+assert.equal(fencedTableHtml.includes("<th>Section</th>"), true);
+assert.equal(fencedTableHtml.includes("<td><strong>Invoice Identification</strong></td>"), true);
+
+const uppercaseFencedTableHtml = renderMarkdown("```CODE\n| Description | Quantity | Unit Price | Amount |\n|:---|:---|:---|:---|\n| Subscription GLM Coding Pro | | $36.45 | $36.45 |\n```");
+assert.equal(uppercaseFencedTableHtml.includes('class="markdown-table-wrapper"'), true);
+assert.equal(uppercaseFencedTableHtml.includes("Copy code"), false);

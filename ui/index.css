@@ -33,6 +33,10 @@ body.sidebar-open {
     overflow: hidden;
 }
 
+body.config-modal-open {
+    overflow: hidden;
+}
+
 .app-container {
     display: flex;
     height: 100vh;
@@ -168,15 +172,9 @@ body.sidebar-open {
     flex-shrink: 0;
 }
 
-.config-editor-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
 .config-editor {
-    min-height: 180px;
-    max-height: 320px;
+    min-height: 360px;
+    max-height: min(62vh, 620px);
     overflow-y: auto;
     font-family: var(--font-mono);
     font-size: 0.76rem;
@@ -192,6 +190,82 @@ body.sidebar-open {
 .config-editor-actions .model-action-btn {
     flex: 1 1 auto;
     min-width: 0;
+}
+
+.config-modal[hidden] {
+    display: none;
+}
+
+.config-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 22px;
+}
+
+.config-modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 30% 10%, rgba(108, 92, 231, 0.22), transparent 34%),
+        rgba(0, 0, 0, 0.68);
+    backdrop-filter: blur(6px);
+}
+
+.config-modal-panel {
+    position: relative;
+    width: min(920px, 100%);
+    max-height: min(88vh, 780px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 24px;
+    background:
+        linear-gradient(145deg, rgba(25, 25, 43, 0.98), rgba(12, 12, 22, 0.98)),
+        var(--bg-secondary);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.config-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.config-modal-eyebrow {
+    color: #a29bfe;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+}
+
+.config-modal-header h2 {
+    font-family: var(--font-heading);
+    font-size: clamp(1.35rem, 4vw, 2rem);
+    line-height: 1.1;
+}
+
+.config-modal-close {
+    border: 1px solid var(--border);
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.config-modal-close:hover {
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
 .model-management-status {
@@ -579,6 +653,64 @@ textarea:focus {
     line-height: 1.55;
 }
 
+.markdown-table-wrapper {
+    width: 100%;
+    max-width: 100%;
+    margin: 14px 0;
+    overflow-x: auto;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+        rgba(0, 0, 0, 0.14);
+}
+
+.markdown-table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+}
+
+.markdown-table th,
+.markdown-table td {
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.markdown-table th:last-child,
+.markdown-table td:last-child {
+    border-right: none;
+}
+
+.markdown-table tr:last-child td {
+    border-bottom: none;
+}
+
+.markdown-table th {
+    background: rgba(108, 92, 231, 0.18);
+    color: #ffffff;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+.markdown-table td {
+    color: #e7e7f2;
+}
+
+.markdown-table tbody tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.025);
+}
+
+.message.user .markdown-table-wrapper {
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(0, 0, 0, 0.1);
+}
+
 /* Code block structures (Production Grade) */
 .code-container {
     margin: 16px 0;
@@ -797,6 +929,133 @@ textarea:focus {
 
 .attachment-chip .remove-btn:hover {
     color: #ff7675;
+}
+
+.upload-progress {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(108, 92, 231, 0.28);
+    border-radius: 14px;
+    background:
+        linear-gradient(135deg, rgba(108, 92, 231, 0.14), rgba(116, 185, 255, 0.08)),
+        rgba(255, 255, 255, 0.035);
+    padding: 12px;
+}
+
+.upload-progress-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.upload-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #a29bfe;
+    flex-shrink: 0;
+    animation: spin 0.85s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.upload-progress-title {
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.upload-progress-message {
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.upload-progress-time {
+    margin-left: auto;
+    color: #d7d5ff;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    white-space: nowrap;
+}
+
+.extraction-preview {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.035);
+    overflow: hidden;
+}
+
+.extraction-preview summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+.extraction-preview summary::-webkit-details-marker {
+    display: none;
+}
+
+.extraction-preview summary::before {
+    content: "▸";
+    color: var(--text-secondary);
+    transition: transform 0.16s ease;
+}
+
+.extraction-preview[open] summary::before {
+    transform: rotate(90deg);
+}
+
+.extraction-preview summary span:first-child {
+    margin-right: auto;
+}
+
+.extraction-meta {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.extraction-preview pre {
+    max-height: 220px;
+    overflow: auto;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    color: #d8d8ea;
+    background: rgba(0, 0, 0, 0.16);
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.extraction-preview.message {
+    margin-top: 12px;
+    background: rgba(0, 0, 0, 0.12);
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.message.user .extraction-preview.message pre {
+    color: rgba(255, 255, 255, 0.88);
 }
 
 /* Hyperlinks and strong text within assistant response bubbles */

@@ -11,7 +11,12 @@ assert.match(
 
 assert.match(
     css,
-    /\.config-editor\s*\{[\s\S]*max-height:\s*320px;[\s\S]*overflow-y:\s*auto;[\s\S]*\}/,
+    /\.config-editor\s*\{[\s\S]*max-height:\s*min\(62vh, 620px\);[\s\S]*overflow-y:\s*auto;[\s\S]*\}/,
+);
+
+assert.match(
+    css,
+    /\.config-modal-panel\s*\{[\s\S]*max-height:\s*min\(88vh, 780px\);[\s\S]*overflow:\s*hidden;[\s\S]*\}/,
 );
 
 assert.match(

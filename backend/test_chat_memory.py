@@ -19,6 +19,7 @@ class ChatMemoryTests(unittest.TestCase):
         self.assertTrue(injected)
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertIn("User likes concise answers", payload["messages"][0]["content"])
+        self.assertIn("Always follow the current request", payload["messages"][0]["content"])
 
     def test_build_chat_transcript_limits_large_input(self):
         messages = [{"role": "user", "content": "a" * (chat_memory.MAX_SUMMARY_TRANSCRIPT_CHARS + 50)}]
@@ -26,6 +27,16 @@ class ChatMemoryTests(unittest.TestCase):
         transcript = chat_memory.build_chat_transcript(messages)
 
         self.assertIn("[Transcript truncated", transcript)
+
+    def test_load_memory_text_limits_prompt_context(self):
+        with _temporary_memory_paths():
+            chat_memory.ensure_chat_memory_dirs()
+            chat_memory.CHAT_MEMORY_FILE.write_text("a" * (chat_memory.MAX_MEMORY_PROMPT_CHARS + 50), encoding="utf-8")
+
+            memory_text = chat_memory.load_memory_text()
+
+        self.assertLessEqual(len(memory_text), chat_memory.MAX_MEMORY_PROMPT_CHARS + len("[Earlier memory truncated]\n\n"))
+        self.assertIn("[Earlier memory truncated]", memory_text)
 
     def test_upsert_active_session_writes_pending_file(self):
         with _temporary_memory_paths():

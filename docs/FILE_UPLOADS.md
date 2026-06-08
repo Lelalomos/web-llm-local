@@ -10,23 +10,68 @@
 - MD
 - JSON
 - CSV
+- JPG
+- JPEG
+- PNG
 
 ## Current Behavior
 
-- PDF text is extracted page by page.
-- If a PDF page has no embedded text, the backend runs OCR on that page and merges the OCR result into the extracted document text.
+- PDF extraction defaults to the advanced `surya_docling` pipeline.
+- PDFs with enough embedded text use a fast embedded-text path before heavy Docling/Surya processing.
+- Docling parses the PDF into structured Markdown-style document text.
+- Surya OCR reads page text when Docling output is sparse, which avoids slow OCR on normal text PDFs.
+- When `ocr_engine` is `qwen_vl`, scanned PDF pages and image uploads use the configured Ollama vision model for OCR.
+- The backend combines Docling parsing output and Surya OCR output before sending document context to the model.
+- If Docling or Surya fails or is unavailable, the backend falls back to the legacy PDF extractor.
+- The legacy PDF extractor reads embedded text page by page and uses PyMuPDF + Tesseract OCR only for pages with no embedded text.
 - Excel files are converted into plain text with sheet names and row values.
+- JPG, JPEG, and PNG image files are converted into text before being sent to the model.
+- Image OCR uses Qwen-VL first when `ocr_engine` is `auto` or `qwen_vl`, then falls back to Tesseract if the vision model fails.
 - Uploaded file content is wrapped into the final prompt sent to the model.
+- Uploaded-file chats are isolated from previous chat turns and stored memory summaries; the model should answer from the uploaded file plus the current prompt only.
+- The UI shows a collapsible `Original extraction` preview after upload and keeps that preview in the sent user message.
+- While upload extraction is running, the UI shows a live `Still working` status with elapsed time so OCR/Docling work does not look frozen.
+- When the user sends the uploaded file to chat, the attachment preview above the input is cleared.
 - Large uploaded documents are truncated to the first `5000` characters before they are inserted into the chat prompt.
 - If no prompt is typed after attaching a file, the default prompt is:
   - `Summarize this document and highlight the key points.`
 
 ## PDF OCR Notes
 
-- OCR is a fallback, not the first path.
-- Text-based PDFs stay faster because they skip OCR.
-- Scanned PDFs are slower because each empty page must be rendered and read with Tesseract.
-- OCR quality depends on page quality and language. The current default OCR language is `eng`.
+- The default advanced pipeline uses Docling for document parsing and Surya for OCR.
+- Surya and Docling can be slower and heavier than the legacy extractor.
+- First use can download model weights.
+- Surya uses GPU when PyTorch can see a GPU in the backend container; CUDA/no-driver/out-of-memory failures retry on CPU before the legacy fallback.
+- `PDF_SURYA_TIMEOUT_SECONDS` defaults to `60` so slow Surya runs fall back instead of blocking uploads for several minutes.
+- `PDF_SURYA_MIN_DOCLING_CHARS` defaults to `1000`; when Docling extracts at least that much text, Surya is skipped for that PDF.
+- `PDF_FAST_TEXT_MIN_CHARS` defaults to `1000`; when embedded PDF text reaches that threshold, Docling/Surya is skipped for faster uploads.
+- The old Tesseract path remains as fallback.
+- Set `PDF_EXTRACTION_MODE=legacy` to force the old extractor.
+- Set `PDF_EXTRACTION_MODE=surya_docling` to use the default advanced extractor.
+
+## Image OCR Notes
+
+- Image uploads can use Qwen-VL through Ollama or Tesseract OCR.
+- The current app config uses `ocr_engine: qwen_vl` and `vision_ocr_model: qwen3-vl:latest`.
+- `ocr_engine` can be `auto`, `tesseract`, `qwen_vl`, or `surya_docling`.
+- `qwen_vl` uses the same configured vision model for image files and scanned PDF pages.
+- `qwen_vl` sends Ollama `num_gpu: 999` by default so the vision OCR model uses GPU when the Ollama container can see an NVIDIA GPU.
+- `surya_docling` is for PDF extraction only. Image files still fall back to Qwen-VL or Tesseract.
+- `IMAGE_OCR_LANGUAGE` defaults to the same value as `PDF_OCR_LANGUAGE`.
+- If `IMAGE_OCR_LANGUAGE` is not set, the default OCR language is `eng`.
+
+## Vision OCR Config
+
+Configure Qwen-VL OCR in `backend/config/app_config.json`:
+
+```json
+{
+  "ocr_engine": "qwen_vl",
+  "vision_ocr_model": "qwen3-vl:latest",
+  "vision_ocr_timeout_seconds": 120,
+  "vision_ocr_prompt": "Extract all visible text from this image. Preserve line breaks and table structure. Return only the extracted text. If the text is Thai, return Thai text exactly."
+}
+```
 
 ## Live Test Files
 

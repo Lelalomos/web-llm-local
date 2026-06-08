@@ -13,7 +13,7 @@ class TaskModeTests(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertIn("coding assistant", payload["messages"][0]["content"])
         self.assertFalse(payload["think"])
-        self.assertEqual(payload["options"]["num_predict"], 1200)
+        self.assertEqual(payload["options"]["num_predict"], 1600)
 
     def test_existing_system_prompt_is_preserved(self):
         payload = {
@@ -28,7 +28,7 @@ class TaskModeTests(unittest.TestCase):
 
         self.assertIn("base rules", payload["messages"][0]["content"])
         self.assertIn("debugging assistant", payload["messages"][0]["content"])
-        self.assertEqual(payload["options"]["num_predict"], 900)
+        self.assertEqual(payload["options"]["num_predict"], 1200)
 
     def test_general_mode_does_not_modify_payload(self):
         payload = {"task_mode": "general", "messages": [{"role": "user", "content": "hello"}]}
@@ -44,7 +44,18 @@ class TaskModeTests(unittest.TestCase):
 
         apply_task_mode(payload)
 
-        self.assertEqual(payload["options"]["num_predict"], 700)
+        self.assertEqual(payload["options"]["num_predict"], 900)
+
+    def test_task_mode_raises_low_config_output_budget(self):
+        payload = {
+            "task_mode": "code_writer",
+            "messages": [{"role": "user", "content": "write rust"}],
+            "options": {"num_predict": 900},
+        }
+
+        apply_task_mode(payload)
+
+        self.assertEqual(payload["options"]["num_predict"], 1600)
 
 
 if __name__ == "__main__":

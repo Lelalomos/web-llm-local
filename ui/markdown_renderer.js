@@ -19,6 +19,10 @@ function encodeBase64(text) {
 
 function createCodeBlockHtml(lang, code, codeBlockIndex) {
     const cleanedCode = code.trim();
+    if (looksLikeMarkdownTableBlock(cleanedCode)) {
+        return renderMarkdownTableBlock(cleanedCode);
+    }
+
     const base64Code = encodeBase64(cleanedCode);
     const btnId = `copy-btn-${codeBlockIndex}`;
     const displayLang = lang || "code";
@@ -66,6 +70,69 @@ function renderInlineMarkdown(text) {
     return html;
 }
 
+function splitMarkdownTableRow(line) {
+    return String(line || "")
+        .trim()
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map(cell => cell.trim());
+}
+
+function isMarkdownTableDivider(line) {
+    const cells = splitMarkdownTableRow(line);
+    return cells.length > 1 && cells.every(cell => /^:?-{3,}:?$/.test(cell));
+}
+
+function looksLikeMarkdownTable(lines, index) {
+    if (index + 1 >= lines.length) {
+        return false;
+    }
+
+    const header = splitMarkdownTableRow(lines[index]);
+    return header.length > 1 && isMarkdownTableDivider(lines[index + 1]);
+}
+
+function looksLikeMarkdownTableBlock(block) {
+    const lines = String(block || "")
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean);
+    return lines.length >= 2 && looksLikeMarkdownTable(lines, 0);
+}
+
+function renderMarkdownTable(tableLines) {
+    const headerCells = splitMarkdownTableRow(tableLines[0]);
+    const bodyRows = tableLines.slice(2).map(splitMarkdownTableRow).filter(row => row.length > 1);
+
+    const headerHtml = headerCells
+        .map(cell => `<th>${renderInlineMarkdown(cell)}</th>`)
+        .join("");
+    const bodyHtml = bodyRows
+        .map(row => {
+            const cells = headerCells.map((_header, index) => row[index] || "");
+            return `<tr>${cells.map(cell => `<td>${renderInlineMarkdown(cell)}</td>`).join("")}</tr>`;
+        })
+        .join("");
+
+    return `
+        <div class="markdown-table-wrapper">
+            <table class="markdown-table">
+                <thead><tr>${headerHtml}</tr></thead>
+                <tbody>${bodyHtml}</tbody>
+            </table>
+        </div>
+    `;
+}
+
+function renderMarkdownTableBlock(block) {
+    const lines = String(block || "")
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean);
+    return renderMarkdownTable(lines);
+}
+
 function renderTextBlock(block) {
     if (looksLikeCodeBlock(block)) {
         return createCodeBlockHtml("", escapeHtml(block), `heuristic-${Math.random().toString(36).slice(2, 8)}`);
@@ -84,7 +151,8 @@ function renderTextBlock(block) {
         listItems = [];
     }
 
-    for (const rawLine of lines) {
+    for (let currentIndex = 0; currentIndex < lines.length; currentIndex += 1) {
+        const rawLine = lines[currentIndex];
         const line = rawLine.trimEnd();
         const trimmed = line.trim();
 
@@ -96,6 +164,21 @@ function renderTextBlock(block) {
         if (codePlaceholderPattern.test(trimmed)) {
             flushList();
             rendered.push(trimmed);
+            continue;
+        }
+
+        if (looksLikeMarkdownTable(lines, currentIndex)) {
+            flushList();
+            const tableLines = [line, lines[currentIndex + 1]];
+            let nextIndex = currentIndex + 2;
+            while (nextIndex < lines.length && splitMarkdownTableRow(lines[nextIndex]).length > 1) {
+                tableLines.push(lines[nextIndex]);
+                nextIndex += 1;
+            }
+            rendered.push(renderMarkdownTable(tableLines));
+            for (let skipIndex = currentIndex + 1; skipIndex < nextIndex; skipIndex += 1) {
+                lines[skipIndex] = "";
+            }
             continue;
         }
 

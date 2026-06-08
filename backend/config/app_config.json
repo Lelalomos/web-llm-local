@@ -5,8 +5,27 @@
   "skill_markdown_enabled": true,
   "skill_prompt_max_chars": 12000,
   "web_search_context_max_chars": 6000,
-  "chat_max_continuations": 2,
+  "search_provider": "auto",
+  "searxng_enabled": true,
+  "searxng_url": "http://searxng:8080",
+  "searxng_timeout_seconds": 8,
+  "meilisearch_enabled": true,
+  "meilisearch_url": "http://meilisearch:7700",
+  "meilisearch_index": "web_search_results",
+  "meilisearch_timeout_seconds": 3,
+  "chat_max_continuations": 4,
+  "task_mode_interpreter_enabled": true,
+  "task_mode_interpreter_model": "gemma2:2b",
+  "task_mode_interpreter_timeout_seconds": 30,
+  "search_context_enhancer_enabled": true,
+  "search_context_enhancer_model": "gemma2:2b",
+  "search_context_enhancer_timeout_seconds": 45,
+  "search_context_enhancer_max_chars": 6000,
+  "ocr_engine": "qwen_vl",
+  "vision_ocr_model": "qwen2.5vl:3b",
+  "vision_ocr_timeout_seconds": 120,
+  "vision_ocr_prompt": "Extract all visible text from this image. Preserve line breaks and table structure. Return only the extracted text. If the text is Thai, return Thai text exactly.",
   "default_options": {
-    "num_predict": 900
+    "num_predict": 1200
   }
 }

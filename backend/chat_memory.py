@@ -11,7 +11,7 @@ CHAT_MEMORY_DIR = Path(os.getenv("CHAT_MEMORY_DIR", "/app/data/chat_memory"))
 ACTIVE_SESSION_DIR = CHAT_MEMORY_DIR / "active_sessions"
 ARCHIVE_SESSION_DIR = CHAT_MEMORY_DIR / "sessions"
 CHAT_MEMORY_FILE = CHAT_MEMORY_DIR / "summary_notes.md"
-MAX_MEMORY_PROMPT_CHARS = int(os.getenv("CHAT_MEMORY_PROMPT_CHARS", "12000"))
+MAX_MEMORY_PROMPT_CHARS = int(os.getenv("CHAT_MEMORY_PROMPT_CHARS", "2000"))
 MAX_SUMMARY_TRANSCRIPT_CHARS = int(os.getenv("CHAT_MEMORY_TRANSCRIPT_CHARS", "20000"))
 AUTO_SUMMARY_IDLE_SECONDS = int(os.getenv("CHAT_MEMORY_IDLE_SECONDS", "900"))
 DEFAULT_SESSION_ID = "session"
@@ -38,7 +38,8 @@ def normalize_session_id(session_id: str | None) -> str:
 def build_memory_system_prompt(memory_text: str) -> str:
     return (
         "Use the following long-term notes about the user to adapt your answers. "
-        "Treat these notes as helpful memory, not as absolute truth if the current chat contradicts them.\n\n"
+        "Treat these notes as helpful memory, not as absolute truth if the current chat contradicts them. "
+        "Always follow the current request's topic, programming language, and output format over older memory notes.\n\n"
         f"{memory_text}"
     )
 

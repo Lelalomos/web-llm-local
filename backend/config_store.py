@@ -9,6 +9,8 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
 CONFIG_PATH = CONFIG_DIR / "app_config.json"
 ALLOWED_WEB_SEARCH_MODES = {"auto", "on", "off"}
+ALLOWED_SEARCH_PROVIDERS = {"auto", "searxng", "legacy"}
+ALLOWED_OCR_ENGINES = {"auto", "tesseract", "qwen_vl", "surya_docling"}
 
 DEFAULT_APP_CONFIG = {
     "default_model": "gemma4:e2b",
@@ -17,9 +19,31 @@ DEFAULT_APP_CONFIG = {
     "skill_markdown_enabled": True,
     "skill_prompt_max_chars": 12000,
     "web_search_context_max_chars": 6000,
-    "chat_max_continuations": 2,
+    "search_provider": "auto",
+    "searxng_enabled": True,
+    "searxng_url": "http://searxng:8080",
+    "searxng_timeout_seconds": 8,
+    "meilisearch_enabled": True,
+    "meilisearch_url": "http://meilisearch:7700",
+    "meilisearch_index": "web_search_results",
+    "meilisearch_timeout_seconds": 3,
+    "chat_max_continuations": 4,
+    "task_mode_interpreter_enabled": True,
+    "task_mode_interpreter_model": "gemma2:2b",
+    "task_mode_interpreter_timeout_seconds": 30,
+    "search_context_enhancer_enabled": True,
+    "search_context_enhancer_model": "qwen2.5:0.5b",
+    "search_context_enhancer_timeout_seconds": 45,
+    "search_context_enhancer_max_chars": 6000,
+    "ocr_engine": "auto",
+    "vision_ocr_model": "qwen3-vl:latest",
+    "vision_ocr_timeout_seconds": 120,
+    "vision_ocr_prompt": (
+        "Extract all visible text from this image. Preserve line breaks and table structure. "
+        "Return only the extracted text. If the text is Thai, return Thai text exactly."
+    ),
     "default_options": {
-        "num_predict": 900,
+        "num_predict": 1200,
     },
 }
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._:/-]*$")
@@ -77,6 +101,20 @@ def validate_app_config(candidate: dict) -> dict:
     default_web_search_mode = normalized.get("default_web_search_mode")
     if default_web_search_mode not in ALLOWED_WEB_SEARCH_MODES:
         raise HTTPException(status_code=400, detail="default_web_search_mode must be auto, on, or off")
+    if normalized.get("search_provider") not in ALLOWED_SEARCH_PROVIDERS:
+        raise HTTPException(status_code=400, detail="search_provider must be auto, searxng, or legacy")
+    if not isinstance(normalized.get("searxng_enabled"), bool):
+        raise HTTPException(status_code=400, detail="searxng_enabled must be a boolean")
+    if not isinstance(normalized.get("searxng_url"), str):
+        raise HTTPException(status_code=400, detail="searxng_url must be a string")
+    _require_int(normalized, "searxng_timeout_seconds", minimum=1, maximum=60)
+    if not isinstance(normalized.get("meilisearch_enabled"), bool):
+        raise HTTPException(status_code=400, detail="meilisearch_enabled must be a boolean")
+    if not isinstance(normalized.get("meilisearch_url"), str):
+        raise HTTPException(status_code=400, detail="meilisearch_url must be a string")
+    if not isinstance(normalized.get("meilisearch_index"), str) or not normalized.get("meilisearch_index").strip():
+        raise HTTPException(status_code=400, detail="meilisearch_index must be a non-empty string")
+    _require_int(normalized, "meilisearch_timeout_seconds", minimum=1, maximum=30)
 
     if not isinstance(normalized.get("skill_markdown_enabled"), bool):
         raise HTTPException(status_code=400, detail="skill_markdown_enabled must be a boolean")
@@ -84,6 +122,30 @@ def validate_app_config(candidate: dict) -> dict:
     _require_int(normalized, "skill_prompt_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "web_search_context_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "chat_max_continuations", minimum=0, maximum=5)
+    if not isinstance(normalized.get("task_mode_interpreter_enabled"), bool):
+        raise HTTPException(status_code=400, detail="task_mode_interpreter_enabled must be a boolean")
+    if not isinstance(normalized.get("task_mode_interpreter_model"), str):
+        raise HTTPException(status_code=400, detail="task_mode_interpreter_model must be a string")
+    if not MODEL_NAME_PATTERN.fullmatch(normalized.get("task_mode_interpreter_model", "")):
+        raise HTTPException(status_code=400, detail="task_mode_interpreter_model contains invalid characters")
+    _require_int(normalized, "task_mode_interpreter_timeout_seconds", minimum=1, maximum=60)
+    if not isinstance(normalized.get("search_context_enhancer_enabled"), bool):
+        raise HTTPException(status_code=400, detail="search_context_enhancer_enabled must be a boolean")
+    if not isinstance(normalized.get("search_context_enhancer_model"), str):
+        raise HTTPException(status_code=400, detail="search_context_enhancer_model must be a string")
+    if not MODEL_NAME_PATTERN.fullmatch(normalized.get("search_context_enhancer_model", "")):
+        raise HTTPException(status_code=400, detail="search_context_enhancer_model contains invalid characters")
+    _require_int(normalized, "search_context_enhancer_timeout_seconds", minimum=1, maximum=120)
+    _require_int(normalized, "search_context_enhancer_max_chars", minimum=500, maximum=20000)
+    if normalized.get("ocr_engine") not in ALLOWED_OCR_ENGINES:
+        raise HTTPException(status_code=400, detail="ocr_engine must be auto, tesseract, qwen_vl, or surya_docling")
+    if not isinstance(normalized.get("vision_ocr_model"), str):
+        raise HTTPException(status_code=400, detail="vision_ocr_model must be a string")
+    if not MODEL_NAME_PATTERN.fullmatch(normalized.get("vision_ocr_model", "")):
+        raise HTTPException(status_code=400, detail="vision_ocr_model contains invalid characters")
+    _require_int(normalized, "vision_ocr_timeout_seconds", minimum=1, maximum=300)
+    if not isinstance(normalized.get("vision_ocr_prompt"), str) or not normalized.get("vision_ocr_prompt").strip():
+        raise HTTPException(status_code=400, detail="vision_ocr_prompt must be a non-empty string")
     _validate_default_options(normalized.get("default_options"))
     return normalized
 
