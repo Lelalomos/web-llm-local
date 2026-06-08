@@ -1,0 +1,12 @@
+{
+  "default_model": "gemma4:e2b",
+  "default_system_prompt": "",
+  "default_web_search_mode": "auto",
+  "skill_markdown_enabled": true,
+  "skill_prompt_max_chars": 12000,
+  "web_search_context_max_chars": 6000,
+  "chat_max_continuations": 2,
+  "default_options": {
+    "num_predict": 900
+  }
+}

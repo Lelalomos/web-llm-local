@@ -15,15 +15,18 @@
 - optional auto web search for current information
 - persistent chat memory with end-of-chat summaries
 - UI model management for pulling and deleting Ollama models
+- file-backed config that the backend reads on each chat request
+- optional skill markdown injection from `backend/skill/*.md`
 - automatic default-model bootstrap for fresh clones
 
 ## Runtime Flow
 
 1. The browser sends chat requests to `/api/chat`.
 2. The backend applies model defaults and optional web search context.
-3. The backend can inject saved long-term chat memory into the prompt.
-4. The backend forwards the request to Ollama.
-5. The UI streams the answer back to the user.
+3. The backend reads the saved app config and optional skill markdown before prompt assembly.
+4. The backend can inject saved long-term chat memory into the prompt.
+5. The backend forwards the request to Ollama.
+6. The UI streams the answer back to the user.
 
 ## Chat Memory Flow
 

@@ -1,5 +1,3 @@
-let OLLAMA_HOST = "http://127.0.0.1:11434";
-
 // DOM Elements
 const modelSelect = document.getElementById("model-select");
 const systemPrompt = document.getElementById("system-prompt");
@@ -20,8 +18,10 @@ const modelPullInput = document.getElementById("model-pull-input");
 const pullModelButton = document.getElementById("pull-model-button");
 const modelDeleteSelect = document.getElementById("model-delete-select");
 const deleteModelButton = document.getElementById("delete-model-button");
-const installedModelList = document.getElementById("installed-model-list");
 const modelManagementStatus = document.getElementById("model-management-status");
+const configEditor = document.getElementById("config-editor");
+const saveConfigButton = document.getElementById("save-config-button");
+const configStatus = document.getElementById("config-status");
 
 // New DOM Elements for Document Chat and Search
 const attachButton = document.getElementById("attach-button");
@@ -38,6 +38,7 @@ let onlineModelCount = 0;
 let currentSessionId = window.createChatSessionId();
 let isManagingModels = false;
 let statusRefreshTimer = null;
+let appConfig = null;
 
 // Auto-resize textarea
 chatInput.addEventListener("input", function() {
@@ -46,24 +47,30 @@ chatInput.addEventListener("input", function() {
 
 // Init
 window.addEventListener("DOMContentLoaded", async () => {
-    await detectApiHost();
-    taskModeSelect.value = window.getDefaultTaskMode();
-    checkOllamaStatus();
     setupEventListeners();
+    taskModeSelect.value = window.getDefaultTaskMode();
+    await loadConfigFromServer();
+    await checkOllamaStatus();
     handleViewportChange();
 });
 
-// Auto-detect if we are running behind Nginx reverse proxy (relative paths) or standalone
-async function detectApiHost() {
-    try {
-        const response = await fetch("/api/tags");
-        if (response.ok) {
-            OLLAMA_HOST = ""; // Use relative paths (Nginx proxy)
-            console.log("[Info] Detected Nginx reverse proxy. Using relative paths.");
-        }
-    } catch (e) {
-        console.log("[Info] Nginx proxy not detected. Using direct host: " + OLLAMA_HOST);
+async function readErrorMessage(response, fallbackMessage) {
+    const fallback = fallbackMessage || `Request failed with status ${response?.status || "unknown"}`;
+    if (!response) {
+        return fallback;
     }
+
+    const contentType = response.headers?.get?.("content-type") || "";
+    if (contentType.includes("application/json")) {
+        const payload = await response.json().catch(() => null);
+        if (payload && typeof payload.detail === "string" && payload.detail.trim()) {
+            return payload.detail.trim();
+        }
+    }
+
+    const bodyText = await response.text().catch(() => "");
+    const trimmed = String(bodyText || "").trim();
+    return trimmed || fallback;
 }
 
 function setupEventListeners() {
@@ -123,6 +130,7 @@ function setupEventListeners() {
     pullModelButton.addEventListener("click", handlePullModel);
     deleteModelButton.addEventListener("click", handleDeleteSelectedModel);
     modelDeleteSelect.addEventListener("change", syncDeleteButtonState);
+    saveConfigButton.addEventListener("click", saveConfigToServer);
     modelPullInput.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
             event.preventDefault();
@@ -161,15 +169,77 @@ function setModelManagementStatus(message) {
     modelManagementStatus.textContent = message;
 }
 
-function formatModelSize(bytes) {
-    if (!Number.isFinite(bytes) || bytes <= 0) {
-        return "Unknown size";
+function setConfigStatus(message) {
+    configStatus.textContent = message;
+}
+
+function applyConfigToUi(config) {
+    appConfig = config;
+    configEditor.value = window.formatConfigForEditor(config);
+    systemPrompt.value = String(config.default_system_prompt || "");
+
+    isWebSearchActive = config.default_web_search_mode !== "off";
+    syncWebSearchToggle();
+}
+
+async function loadConfigFromServer() {
+    setConfigStatus("Loading config...");
+    saveConfigButton.disabled = true;
+
+    try {
+        const response = await window.fetchApi("/api/config");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || "Config load failed");
+        }
+
+        applyConfigToUi(payload);
+        setConfigStatus("Config loaded.");
+    } catch (error) {
+        console.error(error);
+        setConfigStatus(`Config load failed: ${error.message}`);
+    } finally {
+        saveConfigButton.disabled = false;
     }
-    return `${(bytes / 1e9).toFixed(1)} GB`;
+}
+
+async function saveConfigToServer() {
+    let nextConfig;
+    try {
+        nextConfig = window.parseConfigEditorValue(configEditor.value);
+    } catch (error) {
+        setConfigStatus(error.message);
+        alert(error.message);
+        return;
+    }
+
+    setConfigStatus("Saving config...");
+    saveConfigButton.disabled = true;
+
+    try {
+        const response = await window.fetchApi("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(nextConfig)
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || "Config save failed");
+        }
+
+        applyConfigToUi(payload);
+        setConfigStatus("Config saved.");
+        await checkOllamaStatus();
+    } catch (error) {
+        console.error(error);
+        setConfigStatus(`Config save failed: ${error.message}`);
+        alert(`Error saving config: ${error.message}`);
+    } finally {
+        saveConfigButton.disabled = false;
+    }
 }
 
 function renderInstalledModels(models) {
-    installedModelList.innerHTML = "";
     modelDeleteSelect.innerHTML = "";
 
     const optionDefs = window.buildDeleteModelOptions(models);
@@ -181,24 +251,9 @@ function renderInstalledModels(models) {
     });
 
     if (!models.length) {
-        installedModelList.innerHTML = `<div class="model-management-status">No installed models found.</div>`;
         deleteModelButton.disabled = true;
         return;
     }
-
-    models.forEach((model) => {
-        const card = document.createElement("div");
-        card.className = "installed-model-card";
-
-        const meta = document.createElement("div");
-        meta.className = "installed-model-meta";
-        meta.innerHTML = `
-            <div class="installed-model-name">${escapeHtml(model.name)}</div>
-            <div class="installed-model-size">${formatModelSize(model.size)}</div>
-        `;
-        card.appendChild(meta);
-        installedModelList.appendChild(card);
-    });
 
     syncDeleteButtonState();
 }
@@ -280,14 +335,13 @@ async function handleFileUpload(e) {
     formData.append("file", file);
     
     try {
-        const response = await fetch(`${OLLAMA_HOST}/api/upload`, {
+        const response = await window.fetchApi("/api/upload", {
             method: "POST",
             body: formData
         });
         
         if (!response.ok) {
-            const errData = await response.json();
-            throw new Error(errData.detail || "Upload and parsing failed");
+            throw new Error(await readErrorMessage(response, "Upload and parsing failed"));
         }
         
         const data = await response.json();
@@ -335,6 +389,10 @@ window.removeAttachment = function() {
 };
 
 function updateHeaderDisplay(modelName) {
+    if (!modelName || modelName === "Connection error") {
+        currentModelDisplay.textContent = "Offline";
+        return;
+    }
     if (modelName.startsWith("gemma4")) {
         currentModelDisplay.textContent = "Gemma 4";
     } else {
@@ -354,7 +412,7 @@ async function checkOllamaStatus() {
     syncWebSearchToggle();
     
     try {
-        const response = await fetch(`${OLLAMA_HOST}/api/tags`);
+        const response = await window.fetchApi("/api/tags");
         if (response.ok) {
             const data = await response.json();
             const models = data.models || [];
@@ -377,7 +435,12 @@ async function checkOllamaStatus() {
                     modelSelect.appendChild(opt);
                 });
                 
-                const preferredModel = window.pickPreferredModel(models);
+                const configModel = String(appConfig?.default_model || "").trim();
+                const preferredModel = (
+                    models.some((model) => model.name === currentModel) ? currentModel :
+                    models.some((model) => model.name === configModel) ? configModel :
+                    window.pickPreferredModel(models)
+                );
                 modelSelect.value = preferredModel;
                 updateHeaderDisplay(preferredModel);
                 currentModel = modelSelect.value;
@@ -388,13 +451,16 @@ async function checkOllamaStatus() {
             }
             setModelManagementStatus("Ready.");
         } else {
-            throw new Error();
+            throw new Error(await readErrorMessage(response, "Unable to connect to Ollama."));
         }
     } catch (e) {
+        onlineModelCount = 0;
+        currentModel = "";
         statusDot.className = "status-dot";
         statusText.textContent = "Ollama: Offline";
         modelSelect.innerHTML = `<option value="">Connection error</option>`;
         renderInstalledModels([]);
+        updateHeaderDisplay("Connection error");
         setModelManagementStatus("Unable to connect to Ollama.");
         sendButton.disabled = true;
         statusRefreshTimer = setTimeout(checkOllamaStatus, 5000);
@@ -412,7 +478,7 @@ async function handlePullModel() {
     setModelManagementStatus(`Pulling ${modelName}...`);
 
     try {
-        const response = await fetch(`${OLLAMA_HOST}/api/models/pull`, {
+        const response = await window.fetchApi("/api/models/pull", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: modelName })
@@ -444,7 +510,7 @@ async function handleDeleteModel(modelName) {
     setModelManagementStatus(`Deleting ${modelName}...`);
 
     try {
-        const response = await fetch(`${OLLAMA_HOST}/api/models/delete`, {
+        const response = await window.fetchApi("/api/models/delete", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ model: modelName })
@@ -479,7 +545,6 @@ async function handleDeleteSelectedModel() {
 
     await handleDeleteModel(modelName);
 }
-
 // Append welcome card back if empty
 function resetChatView() {
     chatHistory = [];
@@ -630,7 +695,7 @@ async function handleSend() {
     }
     
     try {
-        const response = await fetch(`${OLLAMA_HOST}/api/chat`, {
+        const response = await window.fetchApi("/api/chat", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -646,7 +711,7 @@ async function handleSend() {
         });
 
         if (!response.ok) {
-            throw new Error();
+            throw new Error(await readErrorMessage(response, "Chat request failed"));
         }
 
         // Initialize streaming reader
@@ -655,47 +720,56 @@ async function handleSend() {
         let fullResponseContent = "";
         let hasReceivedMetadata = false;
         let hasStartedAnswer = false;
+        let streamBuffer = "";
 
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
             
             const chunkText = decoder.decode(value, { stream: true });
-            
-            // Ollama sends JSON lines
-            const lines = chunkText.split("\n");
-            for (const line of lines) {
-                if (line.trim()) {
-                    try {
-                        const parsed = JSON.parse(line);
-                        if (parsed.type === "search_status") {
-                            hasReceivedMetadata = true;
-                            if (parsed.search_used) {
-                                assistantBubble.innerHTML = renderMarkdown("Searching web...");
-                                setSearchInProgressStatus(true);
-                            } else {
-                                assistantBubble.innerHTML = renderMarkdown("Thinking...");
-                                setGeneratingStatus();
-                            }
-                            continue;
-                        }
 
-                        const word = parsed.message?.content || "";
-                        if (!hasStartedAnswer && word) {
-                            hasStartedAnswer = true;
-                            assistantBubble.innerHTML = "";
-                            if (hasReceivedMetadata) {
-                                statusText.textContent = "Ollama: Building answer...";
-                            }
-                        }
-                        fullResponseContent += word;
-                        assistantBubble.innerHTML = renderMarkdown(fullResponseContent);
-                        highlightCodeBlocks(assistantBubble);
-                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-                    } catch(err) {
-                        // Handle chunk parsing edge cases
+            const parsedChunk = window.parseNdjsonChunk(streamBuffer, chunkText);
+            streamBuffer = parsedChunk.buffer;
+
+            for (const parsed of parsedChunk.messages) {
+                if (parsed.type === "search_status") {
+                    hasReceivedMetadata = true;
+                    if (parsed.search_used) {
+                        assistantBubble.innerHTML = renderMarkdown("Searching web...");
+                        setSearchInProgressStatus(true);
+                    } else {
+                        assistantBubble.innerHTML = renderMarkdown("Thinking...");
+                        setGeneratingStatus();
+                    }
+                    continue;
+                }
+
+                const word = parsed.message?.content || "";
+                if (!hasStartedAnswer && word) {
+                    hasStartedAnswer = true;
+                    assistantBubble.innerHTML = "";
+                    if (hasReceivedMetadata) {
+                        statusText.textContent = "Ollama: Building answer...";
                     }
                 }
+                fullResponseContent += word;
+                assistantBubble.innerHTML = renderMarkdown(fullResponseContent);
+                highlightCodeBlocks(assistantBubble);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+        }
+
+        if (streamBuffer.trim()) {
+            try {
+                const parsed = JSON.parse(streamBuffer);
+                const word = parsed.message?.content || "";
+                if (word) {
+                    fullResponseContent += word;
+                    assistantBubble.innerHTML = renderMarkdown(fullResponseContent);
+                    highlightCodeBlocks(assistantBubble);
+                }
+            } catch (error) {
+                // Ignore any trailing incomplete chunk.
             }
         }
         
@@ -704,7 +778,11 @@ async function handleSend() {
         chatHistory.push({ role: "assistant", content: fullResponseContent });
 
     } catch (e) {
-        assistantBubble.innerHTML = `<p style="color: #ff7675;">[Connection Error] Unable to receive response from local Ollama service. Please check if your server is running.</p>`;
+        const errorMessage = e instanceof Error && e.message
+            ? e.message
+            : "Unable to receive response from local Ollama service.";
+        assistantBubble.innerHTML = `<p style="color: #ff7675;">[Connection Error] ${escapeHtml(errorMessage)}</p>`;
+        checkOllamaStatus().catch(() => {});
     } finally {
         isGenerating = false;
         sendButton.disabled = false;
@@ -718,7 +796,7 @@ async function unloadModel(modelName) {
     if (!modelName) return;
     try {
         console.log(`[UI] Unloading model from VRAM: ${modelName}`);
-        await fetch(`${OLLAMA_HOST}/api/chat`, {
+        await window.fetchApi("/api/chat", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"

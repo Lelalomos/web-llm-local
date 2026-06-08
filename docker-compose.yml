@@ -45,6 +45,7 @@ services:
       - OLLAMA_GEMMA_LARGE_NUM_GPU=${OLLAMA_GEMMA_LARGE_NUM_GPU:-}
     volumes:
       - ./backend:/app
+      - ./test:/test:ro
     depends_on:
       - ollama
     restart: unless-stopped

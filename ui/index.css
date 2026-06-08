@@ -59,6 +59,8 @@ body.sidebar-open {
     padding: 24px;
     gap: 28px;
     flex-shrink: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .sidebar-header .logo {
@@ -130,24 +132,19 @@ body.sidebar-open {
     min-width: 0;
 }
 
-.model-pull-row {
+.model-control-group {
     display: flex;
+    flex-direction: column;
     gap: 8px;
     min-width: 0;
 }
-
-.model-delete-row {
-    display: flex;
-    gap: 8px;
-    min-width: 0;
-}
-
 .model-select-wrapper {
     min-width: 0;
     flex: 1 1 auto;
 }
 
 .model-input {
+    flex: 1 1 auto;
     width: 100%;
     min-width: 0;
     padding: 12px 14px;
@@ -166,54 +163,35 @@ body.sidebar-open {
 }
 
 .model-action-btn {
-    width: auto;
-    min-width: 78px;
+    width: 100%;
+    min-width: 0;
     flex-shrink: 0;
 }
 
-.installed-model-list {
+.config-editor-panel {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    max-height: 220px;
-    overflow-y: auto;
-    min-width: 0;
-}
-
-.installed-model-card {
-    display: flex;
-    align-items: flex-start;
     gap: 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background-color: rgba(255, 255, 255, 0.03);
-    min-width: 0;
 }
 
-.installed-model-meta {
+.config-editor {
+    min-height: 180px;
+    max-height: 320px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.76rem;
+    line-height: 1.45;
+}
+
+.config-editor-actions {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    gap: 8px;
     min-width: 0;
 }
 
-.installed-model-name {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.installed-model-size {
-    font-size: 0.74rem;
-    color: var(--text-secondary);
-}
-
-.installed-model-delete {
-    display: none;
+.config-editor-actions .model-action-btn {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .model-management-status {
@@ -940,17 +918,8 @@ textarea:focus {
         gap: 6px;
     }
 
-    .model-pull-row,
-    .model-delete-row {
-        flex-direction: column;
-    }
-
     .model-action-btn {
         width: 100%;
-    }
-
-    .installed-model-card {
-        padding: 9px 10px;
     }
 }
 
@@ -990,13 +959,8 @@ textarea:focus {
         border-radius: 0;
     }
 
-    .installed-model-list {
-        max-height: 180px;
-    }
-
-    .installed-model-name {
-        white-space: normal;
-        overflow-wrap: anywhere;
+    .config-editor-actions .model-action-btn {
+        flex-basis: auto;
     }
 }
 

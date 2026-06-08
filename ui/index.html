@@ -11,7 +11,7 @@
     <!-- Highlight.js for Syntax Highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     
-    <link rel="stylesheet" href="index.css">
+    <link rel="stylesheet" href="index.css?v=20260608-2">
 </head>
 <body>
     <div class="app-container">
@@ -57,11 +57,11 @@
             <div class="sidebar-section">
                 <label for="model-pull-input">Manage Models</label>
                 <div class="model-manager">
-                    <div class="model-pull-row">
+                    <div class="model-pull-row model-control-group">
                         <input id="model-pull-input" class="model-input" type="text" placeholder="e.g. qwen2.5:0.5b">
                         <button id="pull-model-button" class="btn btn-primary model-action-btn" type="button">Pull</button>
                     </div>
-                    <div class="model-delete-row">
+                    <div class="model-delete-row model-control-group">
                         <div class="select-wrapper model-select-wrapper">
                             <select id="model-delete-select">
                                 <option value="">Select installed model</option>
@@ -70,8 +70,18 @@
                         <button id="delete-model-button" class="btn btn-secondary model-action-btn" type="button">Delete</button>
                     </div>
                     <div id="model-management-status" class="model-management-status">Ready.</div>
-                    <div id="installed-model-list" class="installed-model-list"></div>
                 </div>
+            </div>
+
+            <div class="sidebar-section">
+                <label for="config-editor">Config</label>
+                    <div class="config-editor-panel">
+                        <textarea id="config-editor" class="config-editor" spellcheck="false" placeholder="{ }"></textarea>
+                        <div class="config-editor-actions">
+                            <button id="save-config-button" class="btn btn-primary model-action-btn" type="button">Save</button>
+                        </div>
+                        <div id="config-status" class="model-management-status">Loading config...</div>
+                    </div>
             </div>
 
             <div class="sidebar-footer">
@@ -150,15 +160,18 @@
     
     <!-- Highlight.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script src="chat_session.js"></script>
-    <script src="layout_state.js"></script>
-    <script src="markdown_renderer.js"></script>
-    <script src="model_management.js"></script>
-    <script src="model_selection.js"></script>
-    <script src="document_prompt.js"></script>
-    <script src="task_modes.js"></script>
-    <script src="textarea_sizing.js"></script>
-    <script src="web_search_state.js"></script>
-    <script src="index.js"></script>
+    <script src="chat_session.js?v=20260608-3"></script>
+    <script src="layout_state.js?v=20260608-3"></script>
+    <script src="markdown_renderer.js?v=20260608-3"></script>
+    <script src="model_management.js?v=20260608-3"></script>
+    <script src="model_selection.js?v=20260608-3"></script>
+    <script src="config_editor.js?v=20260608-3"></script>
+    <script src="document_prompt.js?v=20260608-3"></script>
+    <script src="stream_parser.js?v=20260608-3"></script>
+    <script src="task_modes.js?v=20260608-3"></script>
+    <script src="textarea_sizing.js?v=20260608-3"></script>
+    <script src="web_search_state.js?v=20260608-3"></script>
+    <script src="api_client.js?v=20260608-3"></script>
+    <script src="index.js?v=20260608-3"></script>
 </body>
 </html>

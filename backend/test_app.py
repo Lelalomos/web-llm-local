@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch
 
 from app import (
+    _apply_config_defaults,
+    _apply_default_model,
     _apply_document_chat_defaults,
     _build_continuation_payload,
     _complete_non_stream_chat,
@@ -10,8 +12,9 @@ from app import (
     _normalize_model_name,
     _normalize_session_payload,
     _ollama_json_request,
+    _search_requested,
     _search_status_line,
-    _should_continue_coding_response,
+    _should_continue_response,
 )
 
 
@@ -20,7 +23,7 @@ class AppSearchIntegrationTests(unittest.TestCase):
         payload = {"messages": [{"role": "user", "content": "latest stock news"}]}
 
         with patch("app.execute_web_search", return_value=("Source: Reuters\nURL: https://reuters.com", [{"href": "https://reuters.com"}])):
-            search_used = _inject_search_context(payload, True)
+            search_used = _inject_search_context(payload, True, {"web_search_context_max_chars": 6000})
 
         self.assertTrue(search_used)
         self.assertEqual(payload["messages"][0]["role"], "system")
@@ -35,7 +38,7 @@ class AppSearchIntegrationTests(unittest.TestCase):
         }
 
         with patch("app.execute_web_search", return_value=("Source: Reuters\nURL: https://reuters.com", [{"href": "https://reuters.com"}])):
-            search_used = _inject_search_context(payload, True)
+            search_used = _inject_search_context(payload, True, {"web_search_context_max_chars": 6000})
 
         self.assertTrue(search_used)
         self.assertEqual(payload["messages"][0]["role"], "system")
@@ -46,7 +49,7 @@ class AppSearchIntegrationTests(unittest.TestCase):
         payload = {"messages": [{"role": "user", "content": "latest stock news"}]}
 
         with patch("app.execute_web_search", return_value=("No web search results found.", [])):
-            search_used = _inject_search_context(payload, True)
+            search_used = _inject_search_context(payload, True, {"web_search_context_max_chars": 6000})
 
         self.assertFalse(search_used)
         self.assertEqual(len(payload["messages"]), 1)
@@ -54,6 +57,30 @@ class AppSearchIntegrationTests(unittest.TestCase):
     def test_search_status_line_contains_exact_flag(self):
         self.assertEqual(_search_status_line(True), '{"type": "search_status", "search_used": true}\n')
         self.assertEqual(_search_status_line(False), '{"type": "search_status", "search_used": false}\n')
+
+    def test_search_requested_uses_config_default_mode(self):
+        payload = {"messages": [{"role": "user", "content": "explain gravity"}]}
+        self.assertTrue(_search_requested(dict(payload), {"default_web_search_mode": "on"}))
+        self.assertFalse(_search_requested(dict(payload), {"default_web_search_mode": "off"}))
+
+    def test_apply_default_model_uses_config_when_missing(self):
+        payload = {"messages": [{"role": "user", "content": "hello"}]}
+        _apply_default_model(payload, {"default_model": "gemma4:e2b"})
+        self.assertEqual(payload["model"], "gemma4:e2b")
+
+    def test_apply_config_defaults_sets_system_prompt_and_options(self):
+        payload = {"messages": [{"role": "user", "content": "hello"}]}
+        _apply_config_defaults(
+            payload,
+            {
+                "default_system_prompt": "Follow config",
+                "default_options": {"num_predict": 1200},
+            },
+        )
+
+        self.assertEqual(payload["messages"][0]["role"], "system")
+        self.assertIn("Follow config", payload["messages"][0]["content"])
+        self.assertEqual(payload["options"]["num_predict"], 1200)
 
     def test_document_prompt_disables_thinking_by_default(self):
         payload = {
@@ -138,11 +165,12 @@ class AppSearchIntegrationTests(unittest.TestCase):
             with self.assertRaisesRegex(Exception, "boom"):
                 _ollama_json_request("/api/delete", {"model": "qwen2.5:0.5b"})
 
-    def test_should_continue_coding_response_only_for_coding_modes(self):
+    def test_should_continue_response_for_coding_or_search(self):
         response = {"done_reason": "length", "message": {"content": "print('hi')"}}
 
-        self.assertTrue(_should_continue_coding_response("code_writer", response))
-        self.assertFalse(_should_continue_coding_response("general", response))
+        self.assertTrue(_should_continue_response("code_writer", False, response))
+        self.assertTrue(_should_continue_response("general", True, response))
+        self.assertFalse(_should_continue_response("general", False, response))
 
     def test_build_continuation_payload_appends_messages(self):
         payload = {"messages": [{"role": "user", "content": "write code"}], "stream": True}
@@ -182,11 +210,46 @@ class AppSearchIntegrationTests(unittest.TestCase):
         ]
 
         with patch("app._post_ollama_chat", side_effect=responses):
-            merged = _complete_non_stream_chat(payload, "code_writer")
+            merged = _complete_non_stream_chat(payload, "code_writer", False, 2)
 
         self.assertIn("part one", merged["message"]["content"])
         self.assertIn("part two", merged["message"]["content"])
         self.assertEqual(merged["done_reason"], "stop")
+
+    def test_complete_non_stream_chat_continues_for_search_responses(self):
+        payload = {"messages": [{"role": "user", "content": "latest stock news"}], "stream": False}
+
+        class FakeResponse:
+            def __init__(self, status_code, body):
+                self.status_code = status_code
+                self._body = body
+                self.text = str(body)
+
+            def json(self):
+                return self._body
+
+        responses = [
+            FakeResponse(200, {"message": {"content": "part one"}, "done_reason": "length", "eval_count": 1, "eval_duration": 1, "total_duration": 1}),
+            FakeResponse(200, {"message": {"content": "part two"}, "done_reason": "stop", "eval_count": 1, "eval_duration": 1, "total_duration": 1}),
+        ]
+
+        with patch("app._post_ollama_chat", side_effect=responses):
+            merged = _complete_non_stream_chat(payload, "general", True, 2)
+
+        self.assertIn("part one", merged["message"]["content"])
+        self.assertIn("part two", merged["message"]["content"])
+
+
+class AppCorsTests(unittest.TestCase):
+    def test_cors_middleware_is_enabled(self):
+        from app import app
+        from fastapi.middleware.cors import CORSMiddleware
+        cors_middleware_found = False
+        for middleware in app.user_middleware:
+            if middleware.cls == CORSMiddleware:
+                cors_middleware_found = True
+                break
+        self.assertTrue(cors_middleware_found, "CORSMiddleware is not registered on the FastAPI app")
 
 
 if __name__ == "__main__":

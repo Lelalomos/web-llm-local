@@ -6,18 +6,27 @@ from copy import deepcopy
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
-from duckduckgo_search import DDGS
 from chat_memory import finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
+from config_store import load_app_config, save_app_config
 from document_utils import extract_document_text
 from model_bootstrap import DEFAULT_OLLAMA_MODEL, ensure_default_model_available
 from ollama_options import apply_gpu_defaults
 from search_policy import should_auto_search
+from skill_loader import ensure_skill_dir, inject_skill_context
 from task_modes import apply_task_mode
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Lightweight LLM Gateway")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
-MAX_CODING_CONTINUATIONS = 2
 CODING_TASK_MODES = {"code_writer", "code_editor", "code_reviewer", "bug_fixer"}
 AUTO_SUMMARY_CHECK_SECONDS = int(os.getenv("CHAT_MEMORY_CHECK_SECONDS", "60"))
 CONTINUE_CODE_PROMPT = (
@@ -38,6 +47,16 @@ def get_tags():
         return response.json()
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Ollama server offline: {e}")
+
+
+@app.get("/api/config")
+def get_config():
+    return load_app_config()
+
+
+@app.post("/api/config")
+def update_config(payload: dict = Body(...)):
+    return save_app_config(payload)
 
 
 def _normalize_model_name(payload: dict) -> str:
@@ -95,7 +114,32 @@ async def upload_file(file: UploadFile = File(...)):
 from search_service import execute_web_search
 
 
-def _search_requested(payload: dict) -> bool:
+def _apply_default_model(payload: dict, app_config: dict) -> None:
+    if str(payload.get("model", "")).strip():
+        return
+
+    default_model = str(app_config.get("default_model", "")).strip()
+    if default_model:
+        payload["model"] = default_model
+
+
+def _apply_config_defaults(payload: dict, app_config: dict) -> None:
+    default_system_prompt = str(app_config.get("default_system_prompt", "")).strip()
+    if default_system_prompt:
+        for message in payload.get("messages", []):
+            if message.get("role") == "system":
+                message["content"] = f"{default_system_prompt}\n\n{message.get('content', '')}".strip()
+                break
+        else:
+            payload.setdefault("messages", []).insert(0, {"role": "system", "content": default_system_prompt})
+
+    default_options = app_config.get("default_options", {})
+    options = payload.setdefault("options", {})
+    for key, value in default_options.items():
+        options.setdefault(key, value)
+
+
+def _search_requested(payload: dict, app_config: dict) -> bool:
     search_mode = payload.pop("web_search_mode", None)
     legacy_web_search = payload.pop("web_search", None)
 
@@ -105,6 +149,12 @@ def _search_requested(payload: dict) -> bool:
         return False
     if isinstance(legacy_web_search, bool):
         return legacy_web_search
+
+    default_search_mode = app_config.get("default_web_search_mode", "auto")
+    if default_search_mode == "on":
+        return True
+    if default_search_mode == "off":
+        return False
 
     messages = payload.get("messages") or []
     if not messages:
@@ -186,6 +236,7 @@ def _bootstrap_model_loop() -> None:
 @app.on_event("startup")
 def startup_event():
     global summary_worker_thread, bootstrap_worker_thread
+    ensure_skill_dir()
     summary_worker_stop_event.clear()
     summary_worker_thread = threading.Thread(target=_summary_worker_loop, name="chat-summary-worker", daemon=True)
     summary_worker_thread.start()
@@ -202,7 +253,7 @@ def shutdown_event():
         bootstrap_worker_thread.join(timeout=2)
 
 
-def _inject_search_context(payload: dict, web_search_enabled: bool) -> bool:
+def _inject_search_context(payload: dict, web_search_enabled: bool, app_config: dict) -> bool:
     if not web_search_enabled or "messages" not in payload or not payload["messages"]:
         return False
 
@@ -212,6 +263,9 @@ def _inject_search_context(payload: dict, web_search_enabled: bool) -> bool:
 
     query = latest_message.get("content", "")
     search_context, _ = execute_web_search(query)
+    max_chars = int(app_config.get("web_search_context_max_chars", 0) or 0)
+    if max_chars > 0 and len(search_context) > max_chars:
+        search_context = search_context[:max_chars].rstrip() + "\n\n[Web search context truncated to fit config limits.]"
 
     if not search_context or search_context == "No web search results found.":
         return False
@@ -231,8 +285,8 @@ def _inject_search_context(payload: dict, web_search_enabled: bool) -> bool:
     return True
 
 
-def _should_continue_coding_response(task_mode: str, response_json: dict) -> bool:
-    if task_mode not in CODING_TASK_MODES:
+def _should_continue_response(task_mode: str, search_used: bool, response_json: dict) -> bool:
+    if task_mode not in CODING_TASK_MODES and not search_used:
         return False
 
     message = response_json.get("message", {})
@@ -277,7 +331,7 @@ def _post_ollama_chat(payload: dict, stream: bool):
     )
 
 
-def _complete_non_stream_chat(payload: dict, task_mode: str) -> dict:
+def _complete_non_stream_chat(payload: dict, task_mode: str, search_used: bool, max_continuations: int) -> dict:
     current_payload = deepcopy(payload)
     current_payload["stream"] = False
     response = _post_ollama_chat(current_payload, stream=False)
@@ -286,8 +340,8 @@ def _complete_non_stream_chat(payload: dict, task_mode: str) -> dict:
         raise HTTPException(status_code=response.status_code, detail=response.text)
 
     response_json = response.json()
-    for _ in range(MAX_CODING_CONTINUATIONS):
-        if not _should_continue_coding_response(task_mode, response_json):
+    for _ in range(max_continuations):
+        if not _should_continue_response(task_mode, search_used, response_json):
             break
 
         continuation_payload = _build_continuation_payload(current_payload, response_json.get("message", {}).get("content", ""))
@@ -302,13 +356,13 @@ def _complete_non_stream_chat(payload: dict, task_mode: str) -> dict:
     return response_json
 
 
-def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str):
+def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str, search_used: bool, max_continuations: int):
     current_payload = deepcopy(payload)
     current_payload["stream"] = True
     final_response_json = {}
     full_response_parts = []
 
-    for _ in range(MAX_CODING_CONTINUATIONS + 1):
+    for _ in range(max_continuations + 1):
         response = _post_ollama_chat(current_payload, stream=True)
         if response.status_code != 200:
             raise HTTPException(status_code=response.status_code, detail=response.text)
@@ -338,7 +392,7 @@ def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str):
         else:
             final_response_json = response_json
 
-        if not _should_continue_coding_response(task_mode, response_json):
+        if not _should_continue_response(task_mode, search_used, response_json):
             break
 
         current_payload = _build_continuation_payload(current_payload, "".join(current_content_parts))
@@ -354,17 +408,23 @@ def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str):
 
 @app.post("/api/chat")
 def chat(payload: dict = Body(...)):
+    app_config = load_app_config()
+    _apply_default_model(payload, app_config)
     model, session_id, _, _ = _normalize_session_payload(payload)
     payload.pop("session_id", None)
     _run_pending_summaries(session_id)
+    _apply_config_defaults(payload, app_config)
     apply_gpu_defaults(payload)
     _apply_document_chat_defaults(payload)
     task_mode = apply_task_mode(payload)
     inject_memory_context(payload)
+    if app_config.get("skill_markdown_enabled", True):
+        inject_skill_context(payload, int(app_config.get("skill_prompt_max_chars", 0) or 0))
 
     # 1. Check if Web Search is requested
-    web_search_enabled = _search_requested(payload)
-    search_used = _inject_search_context(payload, web_search_enabled)
+    web_search_enabled = _search_requested(payload, app_config)
+    search_used = _inject_search_context(payload, web_search_enabled, app_config)
+    max_continuations = int(app_config.get("chat_max_continuations", 0) or 0)
                     
     # 2. Forward request to Ollama
     stream = payload.get("stream", False)
@@ -372,11 +432,11 @@ def chat(payload: dict = Body(...)):
         if stream:
             def generate_stream():
                 yield _search_status_line(search_used)
-                for line in _stream_chat_chunks(payload, task_mode, session_id):
+                for line in _stream_chat_chunks(payload, task_mode, session_id, search_used, max_continuations):
                     yield line
             return StreamingResponse(generate_stream(), media_type="application/x-ndjson")
         else:
-            response_json = _complete_non_stream_chat(payload, task_mode)
+            response_json = _complete_non_stream_chat(payload, task_mode, search_used, max_continuations)
             response_json["search_used"] = search_used
             _persist_completed_chat(
                 session_id,
