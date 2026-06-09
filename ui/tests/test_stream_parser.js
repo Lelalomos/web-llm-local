@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { parseNdjsonChunk } = require("./stream_parser");
+const { parseNdjsonChunk } = require("../stream_parser");
 
 let state = parseNdjsonChunk("", '{"type":"search_status","search_used":true}\n{"message":{"content":"Hel');
 assert.equal(state.messages.length, 1);

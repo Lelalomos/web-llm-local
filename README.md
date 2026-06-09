@@ -287,13 +287,13 @@ curl -s http://127.0.0.1:8000/api/upload \
 Run backend tests in the backend container:
 
 ```bash
-docker compose run --rm backend python -m unittest
+docker compose run --rm backend python -m unittest discover -s /app/tests -p 'test*.py'
 ```
 
 Run UI tests in a Node container:
 
 ```bash
-docker run --rm -v "$PWD:/workspace" -w /workspace node:22-alpine sh -c 'for test_file in ui/test_*.js; do node "$test_file"; done'
+docker run --rm -v "$PWD/ui:/ui" -w /ui node:22-alpine node --test tests/test_*.js
 ```
 
 ## Documentation

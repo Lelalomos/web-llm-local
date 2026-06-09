@@ -4,6 +4,7 @@
 /models/
 /data/chat_memory/
 /backend/data/chat_memory/
+/meili_data/
 ollama-linux-amd64.tgz
 *.log
 *.pyc

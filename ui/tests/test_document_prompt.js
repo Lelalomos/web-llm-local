@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { DEFAULT_DOCUMENT_PROMPT, MAX_DOCUMENT_PROMPT_CHARS, buildFinalPrompt, truncateDocumentText } = require("./document_prompt");
+const { DEFAULT_DOCUMENT_PROMPT, MAX_DOCUMENT_PROMPT_CHARS, buildFinalPrompt, truncateDocumentText } = require("../document_prompt");
 
 assert.equal(buildFinalPrompt("hello", "", ""), "hello");
 assert.equal(

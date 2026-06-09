@@ -9,7 +9,7 @@ const sandbox = {
     Date,
 };
 vm.createContext(sandbox);
-vm.runInContext(fs.readFileSync(path.join(__dirname, "chat_session.js"), "utf8"), sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "chat_session.js"), "utf8"), sandbox);
 
 const sessionId = sandbox.window.createChatSessionId();
 

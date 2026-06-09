@@ -6,7 +6,7 @@ const assert = require("assert");
 const sandbox = { window: {} };
 vm.createContext(sandbox);
 
-const script = fs.readFileSync(path.join(__dirname, "layout_state.js"), "utf8");
+const script = fs.readFileSync(path.join(__dirname, "..", "layout_state.js"), "utf8");
 vm.runInContext(script, sandbox);
 
 assert.strictEqual(sandbox.window.isCompactLayout(900), true);

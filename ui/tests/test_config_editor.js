@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { formatConfigForEditor, parseConfigEditorValue } = require("./config_editor");
+const { formatConfigForEditor, parseConfigEditorValue } = require("../config_editor");
 
 const configText = formatConfigForEditor({ default_model: "gemma4:e2b" });
 assert.equal(configText.includes('"default_model": "gemma4:e2b"'), true);

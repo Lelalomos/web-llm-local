@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { encodeBase64, looksLikeCodeBlock, renderMarkdown } = require("./markdown_renderer");
+const { encodeBase64, looksLikeCodeBlock, renderMarkdown } = require("../markdown_renderer");
 
 const headingHtml = renderMarkdown("### Title");
 assert.equal(headingHtml.includes('class="markdown-heading level-3"'), true);

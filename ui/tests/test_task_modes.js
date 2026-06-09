@@ -7,10 +7,10 @@ const {
     getTaskModeDetectionStatusMessage,
     inferTaskModeFromPrompt,
     inferTaskModeForPrompt,
-} = require("./task_modes");
+} = require("../task_modes");
 
-const indexJs = fs.readFileSync(path.join(__dirname, "index.js"), "utf8");
-const indexHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+const indexJs = fs.readFileSync(path.join(__dirname, "..", "index.js"), "utf8");
+const indexHtml = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
 
 assert.equal(getDefaultTaskMode(), "general");
 assert.equal(TASK_MODE_OPTIONS.some(option => option.value === "code_writer"), true);

@@ -7,7 +7,7 @@ const {
     normalizeApiPath,
     setPreferredApiBase,
     shouldRetryApiResponse,
-} = require("./api_client");
+} = require("../api_client");
 
 assert.equal(normalizeApiPath("/api/chat"), "/api/chat");
 assert.equal(normalizeApiPath("api/chat"), "/api/chat");

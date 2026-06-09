@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { pickPreferredModel } = require("./model_selection");
+const { pickPreferredModel } = require("../model_selection");
 
 assert.equal(
     pickPreferredModel([

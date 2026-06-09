@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { buildDeleteModelOptions, isValidModelName, normalizeModelName } = require("./model_management");
+const { buildDeleteModelOptions, isValidModelName, normalizeModelName } = require("../model_management");
 
 assert.equal(isValidModelName("qwen2.5:0.5b"), true);
 assert.equal(isValidModelName(" hf.co/unsloth/gemma-4-12b-it-GGUF:Q4_K_M "), true);
