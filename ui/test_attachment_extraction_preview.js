@@ -23,6 +23,11 @@ assert.match(js, /Still working\. OCR\/model extraction can take a while/);
 assert.match(js, /Original extraction/);
 assert.match(js, /renderAttachmentChip\(attachedFile\)/);
 assert.match(js, /appendMessage\("user", userVisiblePrompt, activeFileName, activeFile\)/);
+assert.match(js, /function clearAttachmentInputPreview\(\)/);
+assert.match(
+    js,
+    /const activeFile = attachedFile \? \{ \.\.\.attachedFile \} : null;\s*if \(activeFile\) \{\s*clearAttachmentInputPreview\(\);\s*\}[\s\S]*?appendMessage\("user", userVisiblePrompt, activeFileName, activeFile\);[\s\S]*?window\.inferTaskModeForPrompt/,
+);
 assert.match(js, /if \(!activeFile\) \{\s*chatHistory\.forEach\(msg => apiMessages\.push\(msg\)\);/s);
 assert.match(js, /renderOriginalImagePreview\(fileExtraction, "message"\)/);
 assert.match(js, /file\?\.isImage \? "🖼️" : "📄"/);

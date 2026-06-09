@@ -581,11 +581,15 @@ function renderOriginalImagePreview(file, mode = "input") {
 
 window.removeAttachment = function() {
     revokeImagePreviewUrl(attachedFile);
+    clearAttachmentInputPreview();
+};
+
+function clearAttachmentInputPreview() {
     attachedFile = null;
     stopUploadStatusTimer();
     attachmentContainer.innerHTML = "";
     attachmentContainer.style.display = "none";
-};
+}
 
 function updateHeaderDisplay(modelName) {
     if (!modelName || modelName === "Connection error") {
@@ -866,6 +870,9 @@ async function handleSend() {
     const activeFileName = attachedFile ? attachedFile.name : null;
     const activeFileText = attachedFile ? attachedFile.text : null;
     const activeFile = attachedFile ? { ...attachedFile } : null;
+    if (activeFile) {
+        clearAttachmentInputPreview();
+    }
     
     // Add user message to UI (with document badge if applicable)
     const userVisiblePrompt = text || window.DEFAULT_DOCUMENT_PROMPT;
@@ -903,14 +910,6 @@ async function handleSend() {
     // Add assistant bubble for streaming response
     const assistantBubble = appendMessage("assistant", "Preparing...");
     setGeneratingStatus();
-    
-    // Clear attachment chip and extraction preview immediately on send.
-    if (attachedFile) {
-        attachedFile = null;
-        stopUploadStatusTimer();
-        attachmentContainer.innerHTML = "";
-        attachmentContainer.style.display = "none";
-    }
 
     let clearStreamTimers = () => {};
     
