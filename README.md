@@ -30,6 +30,8 @@ Docker-based local AI chat studio with Ollama, a FastAPI gateway, a browser UI, 
 
 ## Feature Screenshots
 
+video example: [video overview](https://drive.google.com/file/d/17oqKH3b8yyg8zrWMchJtqxqcxxl9Ok73/view?usp=sharing)
+
 ### Web Overview and Model Management
 
 ![Web overview with model pull and delete support](images/6.png)
