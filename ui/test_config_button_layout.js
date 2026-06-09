@@ -10,6 +10,7 @@ assert.match(html, /id="open-config-button"/);
 assert.match(html, /id="config-modal"/);
 assert.match(html, /id="close-config-button"/);
 assert.match(html, /id="save-config-button"/);
+assert.match(html, /id="clear-memory-button"/);
 assert.match(html, /href="index\.css\?v=20260609-2"/);
 assert.match(html, /src="index\.js\?v=20260609-4"/);
 assert.doesNotMatch(
@@ -23,5 +24,8 @@ assert.match(js, /function setupConfigModalEventListeners\(\)/);
 assert.match(js, /setupConfigModalEventListeners\(\);\n\s+setupEventListeners\(\);/);
 assert.match(js, /openConfigButton\.addEventListener\("click", openConfigModal\)/);
 assert.match(js, /configModalBackdrop\.addEventListener\("click", closeConfigModal\)/);
+assert.match(js, /clearMemoryButton\.addEventListener\("click", clearChatMemoryFromServer\)/);
+assert.match(js, /function clearChatMemoryFromServer\(\)/);
+assert.match(js, /fetchApi\("\/api\/chat\/memory", \{ method: "DELETE" \}\)/);
 
 console.log("config_button_layout tests passed");

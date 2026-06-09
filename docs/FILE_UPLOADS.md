@@ -29,7 +29,7 @@
 - Image uploads show the original image preview in the chat message after send.
 - Image OCR uses Qwen-VL first when `ocr_engine` is `auto` or `qwen_vl`, then falls back to Tesseract if the vision model fails.
 - Uploaded file content is wrapped into the final prompt sent to the model.
-- Uploaded-file chats are isolated from previous chat turns and stored memory summaries; the model should answer from the uploaded file plus the current prompt only.
+- Uploaded-file chats include previous chat turns and stored memory summaries, while the uploaded file content remains the main context for the current answer.
 - The UI shows a collapsible `Original extraction` preview after upload and keeps that preview in the sent user message.
 - While upload extraction is running, the UI shows a live `Still working` status with elapsed time so OCR/Docling work does not look frozen.
 - When the user sends the uploaded file to chat, the attachment preview above the input is cleared.

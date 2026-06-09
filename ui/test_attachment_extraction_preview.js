@@ -28,7 +28,7 @@ assert.match(
     js,
     /const activeFile = attachedFile \? \{ \.\.\.attachedFile \} : null;\s*if \(activeFile\) \{\s*clearAttachmentInputPreview\(\);\s*\}[\s\S]*?appendMessage\("user", userVisiblePrompt, activeFileName, activeFile\);[\s\S]*?window\.inferTaskModeForPrompt/,
 );
-assert.match(js, /if \(!activeFile\) \{\s*chatHistory\.forEach\(msg => apiMessages\.push\(msg\)\);/s);
+assert.match(js, /chatHistory\.forEach\(msg => apiMessages\.push\(msg\)\);/);
 assert.match(js, /renderOriginalImagePreview\(fileExtraction, "message"\)/);
 assert.match(js, /file\?\.isImage \? "🖼️" : "📄"/);
 

@@ -22,6 +22,12 @@ class SkillLoaderTests(unittest.TestCase):
         self.assertIn("b.md", text)
         self.assertTrue(text.index("a.md") < text.index("b.md"))
 
+    def test_default_skill_dir_is_project_root_skill_folder(self):
+        import skill_loader
+
+        self.assertEqual(skill_loader.SKILL_DIR.name, "skill")
+        self.assertEqual(skill_loader.SKILL_DIR, skill_loader.PROJECT_ROOT / "skill")
+
     def test_inject_skill_context_prepends_system_message(self):
         payload = {"messages": [{"role": "user", "content": "hello"}]}
 

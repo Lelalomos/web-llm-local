@@ -28,6 +28,13 @@ DEFAULT_APP_CONFIG = {
     "meilisearch_index": "web_search_results",
     "meilisearch_timeout_seconds": 3,
     "chat_max_continuations": 4,
+    "chat_summary_prompt": (
+        "You are creating persistent memory notes about the user. "
+        "Write a detailed markdown summary with these sections exactly: "
+        "## Session Goal, ## Important Facts, ## User Preferences, ## Personal Style, ## Open Questions, ## Useful Follow-ups. "
+        "Keep it factual. Do not invent details. Include concrete details that would help future chats understand the user better. "
+        "Do not include session ids, model names, task mode names, timestamps, or backend metadata."
+    ),
     "task_mode_interpreter_enabled": True,
     "task_mode_interpreter_model": "gemma2:2b",
     "task_mode_interpreter_timeout_seconds": 30,
@@ -122,6 +129,8 @@ def validate_app_config(candidate: dict) -> dict:
     _require_int(normalized, "skill_prompt_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "web_search_context_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "chat_max_continuations", minimum=0, maximum=5)
+    if not isinstance(normalized.get("chat_summary_prompt"), str) or not normalized.get("chat_summary_prompt").strip():
+        raise HTTPException(status_code=400, detail="chat_summary_prompt must be a non-empty string")
     if not isinstance(normalized.get("task_mode_interpreter_enabled"), bool):
         raise HTTPException(status_code=400, detail="task_mode_interpreter_enabled must be a boolean")
     if not isinstance(normalized.get("task_mode_interpreter_model"), str):

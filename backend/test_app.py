@@ -1,6 +1,9 @@
 import unittest
 from unittest.mock import patch
+from pathlib import Path
+import tempfile
 
+import chat_memory
 from app import (
     _apply_config_defaults,
     _apply_default_model,
@@ -19,10 +22,93 @@ from app import (
     _stream_error_line,
     _should_continue_response,
     chat,
+    delete_chat_memory,
+    end_chat,
 )
 
 
 class AppSearchIntegrationTests(unittest.TestCase):
+    def test_ended_chat_memory_is_injected_into_new_chat(self):
+        captured_payloads = []
+        captured_summary_payloads = []
+
+        class FakeResponse:
+            status_code = 200
+            text = "{}"
+
+            def __init__(self, content):
+                self._content = content
+
+            def json(self):
+                return {"message": {"content": self._content}}
+
+            def raise_for_status(self):
+                return None
+
+        def fake_ollama_chat(payload, stream=False):
+            captured_payloads.append(payload)
+            return FakeResponse("Okay, Test User.")
+
+        def fake_summary_chat(url, json, timeout):
+            captured_summary_payloads.append(json)
+            return FakeResponse("## Important Facts\nThe user's name is Test User.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            with patch.multiple(
+                chat_memory,
+                CHAT_MEMORY_DIR=temp_root,
+                ACTIVE_SESSION_DIR=temp_root / "active_sessions",
+                ARCHIVE_SESSION_DIR=temp_root / "sessions",
+                CHAT_MEMORY_FILE=temp_root / "summary_notes.md",
+            ), patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "chat_summary_prompt": "APP CUSTOM SUMMARY PROMPT"}), patch("app._run_pending_summaries"), patch("app._post_ollama_chat", side_effect=fake_ollama_chat), patch(
+                "chat_memory.requests.post",
+                side_effect=fake_summary_chat,
+            ):
+                chat_memory.ensure_chat_memory_dirs()
+                chat_memory.CHAT_MEMORY_FILE.write_text("## Important Facts\nThe user's name is Old Memory.", encoding="utf-8")
+
+                first_response = chat(
+                    {
+                        "model": "gemma2:2b",
+                        "stream": False,
+                        "session_id": "name-memory",
+                        "messages": [{"role": "user", "content": "My name is Test User."}],
+                    }
+                )
+
+                self.assertEqual(first_response["message"]["content"], "Okay, Test User.")
+
+                end_chat(
+                    {
+                        "model": "gemma2:2b",
+                        "session_id": "name-memory",
+                        "messages": [{"role": "user", "content": "My name is Test User."}],
+                        "task_mode": "general",
+                    }
+                )
+
+                second_response = chat(
+                    {
+                        "model": "gemma2:2b",
+                        "stream": False,
+                        "session_id": "new-chat",
+                        "messages": [{"role": "user", "content": "What is my name?"}],
+                    }
+                )
+
+        self.assertEqual(second_response["message"]["content"], "Okay, Test User.")
+        self.assertEqual(captured_summary_payloads[0]["messages"][0]["content"], "APP CUSTOM SUMMARY PROMPT")
+        summary_prompt = captured_summary_payloads[0]["messages"][-1]["content"]
+        self.assertIn("Existing relevant long-term memory notes", summary_prompt)
+        self.assertIn("Recent finished chat transcript", summary_prompt)
+        self.assertIn("My name is Test User.", summary_prompt)
+        self.assertIn("Okay, Test User.", summary_prompt)
+        second_chat_payload = captured_payloads[-1]
+        self.assertEqual(second_chat_payload["messages"][0]["role"], "system")
+        self.assertIn("The user's name is Test User.", second_chat_payload["messages"][0]["content"])
+        self.assertEqual(second_chat_payload["messages"][-1]["content"], "What is my name?")
+
     def test_inject_search_context_adds_system_message(self):
         payload = {"messages": [{"role": "user", "content": "latest stock news"}]}
 
@@ -200,7 +286,7 @@ class AppSearchIntegrationTests(unittest.TestCase):
 
         self.assertFalse(payload["think"])
 
-    def test_document_chat_skips_memory_summary_and_skill_context(self):
+    def test_document_chat_uses_memory_but_skips_summary_and_skill_context(self):
         payload = {
             "model": "gemma2:2b",
             "stream": False,
@@ -218,8 +304,71 @@ class AppSearchIntegrationTests(unittest.TestCase):
 
         self.assertEqual(response["message"]["content"], "summary")
         summaries_mock.assert_not_called()
-        memory_mock.assert_not_called()
+        memory_mock.assert_called_once()
         skill_mock.assert_not_called()
+
+    def test_general_chat_uses_memory_context(self):
+        payload = {
+            "model": "gemma2:2b",
+            "stream": False,
+            "session_id": "general-session",
+            "messages": [{"role": "user", "content": "remember my name?"}],
+        }
+
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "answer"}}), patch("app._persist_completed_chat"):
+            response = chat(payload)
+
+        self.assertEqual(response["message"]["content"], "answer")
+        memory_mock.assert_called_once()
+
+    def test_chat_reads_all_skill_files_before_answer(self):
+        captured_payloads = []
+
+        class FakeResponse:
+            status_code = 200
+            text = "{}"
+
+            def json(self):
+                return {"message": {"content": "answer"}}
+
+        def fake_ollama_chat(payload, stream=False):
+            captured_payloads.append(payload)
+            return FakeResponse()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            skill_dir = Path(temp_dir) / "skill"
+            nested_dir = skill_dir / "nested"
+            nested_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "a.md").write_text("Always mention Alpha skill.", encoding="utf-8")
+            (nested_dir / "b.md").write_text("Always mention Beta skill.", encoding="utf-8")
+
+            with patch("skill_loader.SKILL_DIR", skill_dir), patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": True, "skill_prompt_max_chars": 12000}), patch("app._run_pending_summaries"), patch("app.inject_memory_context"), patch("app._post_ollama_chat", side_effect=fake_ollama_chat), patch("app._persist_completed_chat"):
+                response = chat(
+                    {
+                        "model": "gemma2:2b",
+                        "stream": False,
+                        "session_id": "skill-session",
+                        "messages": [{"role": "user", "content": "hello"}],
+                    }
+                )
+
+        self.assertEqual(response["message"]["content"], "answer")
+        model_messages = captured_payloads[0]["messages"]
+        self.assertEqual(model_messages[0]["role"], "system")
+        self.assertIn("## Skill File: a.md", model_messages[0]["content"])
+        self.assertIn("Always mention Alpha skill.", model_messages[0]["content"])
+        self.assertIn("## Skill File: nested/b.md", model_messages[0]["content"])
+        self.assertIn("Always mention Beta skill.", model_messages[0]["content"])
+        self.assertEqual(model_messages[-1]["content"], "hello")
+
+    def test_delete_chat_memory_endpoint_clears_saved_memory(self):
+        with patch("app.clear_chat_memory", return_value={"summary_removed": True, "active_sessions_removed": 2, "archived_sessions_removed": 3}):
+            response = delete_chat_memory()
+
+        self.assertEqual(response["status"], "cleared")
+        self.assertTrue(response["summary_removed"])
+        self.assertEqual(response["active_sessions_removed"], 2)
+        self.assertEqual(response["archived_sessions_removed"], 3)
 
     def test_normalize_session_payload_requires_model_and_messages(self):
         with self.assertRaisesRegex(Exception, "model is required"):

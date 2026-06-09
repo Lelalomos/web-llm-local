@@ -19,9 +19,10 @@
 - small-model search context enhancement before final answer generation
 - direct website context when a user pastes an `http` or `https` URL
 - persistent chat memory with end-of-chat summaries
+- clear saved chat memory and archived chat history from the UI
 - UI model management for pulling and deleting Ollama models
 - file-backed config that the backend reads on each chat request
-- optional skill markdown injection from `backend/skill/*.md`
+- optional skill markdown injection from `skill/*.md`
 - automatic default-model bootstrap for fresh clones
 
 ## Runtime Flow
@@ -47,9 +48,10 @@
 2. After each completed assistant reply, the backend updates the active session file automatically.
 3. When an older session stays idle long enough, the backend summarizes it with the saved model and task mode.
 4. The raw session is archived as JSON.
-5. The running memory summary file is appended in Markdown.
-6. The summarized session is removed from the active pending queue.
-7. Future chats automatically receive that memory file as prompt context.
+5. The backend can retrieve relevant old memory notes for summary context.
+6. The running memory summary file is appended with summary text only.
+7. The summarized session is removed from the active pending queue.
+8. Future chats automatically receive that memory file as prompt context.
 
 ## Document Upload Flow
 

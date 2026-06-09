@@ -1,8 +1,10 @@
+import os
 from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-SKILL_DIR = BASE_DIR / "skill"
+PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", BASE_DIR.parent))
+SKILL_DIR = Path(os.getenv("SKILL_DIR", PROJECT_ROOT / "skill"))
 
 
 def ensure_skill_dir() -> Path:

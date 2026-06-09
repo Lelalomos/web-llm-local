@@ -20,6 +20,7 @@ class ChatMemoryTests(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertIn("User likes concise answers", payload["messages"][0]["content"])
         self.assertIn("Always follow the current request", payload["messages"][0]["content"])
+        self.assertIn("Prefer concrete remembered facts", payload["messages"][0]["content"])
 
     def test_build_chat_transcript_limits_large_input(self):
         messages = [{"role": "user", "content": "a" * (chat_memory.MAX_SUMMARY_TRANSCRIPT_CHARS + 50)}]
@@ -37,6 +38,23 @@ class ChatMemoryTests(unittest.TestCase):
 
         self.assertLessEqual(len(memory_text), chat_memory.MAX_MEMORY_PROMPT_CHARS + len("[Earlier memory truncated]\n\n"))
         self.assertIn("[Earlier memory truncated]", memory_text)
+
+    def test_default_memory_prompt_window_keeps_concrete_name_before_later_unknown_notes(self):
+        name_note = '## Important Facts\nUser full name is "Memory Window Test User."'
+        unknown_note = "## Important Facts\nThe assistant did not know the user's name."
+        filler = "x" * 9000
+
+        with _temporary_memory_paths():
+            chat_memory.ensure_chat_memory_dirs()
+            chat_memory.CHAT_MEMORY_FILE.write_text(
+                f"{name_note}\n\n{filler}\n\n{unknown_note}",
+                encoding="utf-8",
+            )
+
+            memory_text = chat_memory.load_memory_text()
+
+        self.assertIn("Memory Window Test User", memory_text)
+        self.assertIn("did not know the user's name", memory_text)
 
     def test_upsert_active_session_writes_pending_file(self):
         with _temporary_memory_paths():
@@ -71,6 +89,68 @@ class ChatMemoryTests(unittest.TestCase):
             self.assertTrue(result["archive_path"].exists())
             self.assertTrue(result["memory_path"].exists())
             self.assertIn("## Session Goal", result["memory_path"].read_text(encoding="utf-8"))
+
+    def test_append_summary_note_writes_only_summary_text(self):
+        with _temporary_memory_paths():
+            path = chat_memory.append_summary_note(
+                "chat-1",
+                "gemma4:e2b",
+                "general",
+                "## Important Facts\nThe user's name is Summary Only User.",
+            )
+
+            text = path.read_text(encoding="utf-8")
+
+        self.assertIn("The user's name is Summary Only User.", text)
+        self.assertNotIn("Session ID", text)
+        self.assertNotIn("Model:", text)
+        self.assertNotIn("Task Mode", text)
+
+    def test_append_summary_note_appends_summary_text_without_metadata(self):
+        with _temporary_memory_paths():
+            chat_memory.append_summary_note("chat-1", "gemma4:e2b", "general", "## Important Facts\nFirst summary.")
+            path = chat_memory.append_summary_note("chat-2", "gemma4:e2b", "general", "## Important Facts\nSecond summary.")
+
+            text = path.read_text(encoding="utf-8")
+
+        self.assertIn("First summary.", text)
+        self.assertIn("Second summary.", text)
+        self.assertNotIn("chat-1", text)
+        self.assertNotIn("chat-2", text)
+
+    def test_clear_chat_memory_removes_summary_active_and_archived_files(self):
+        with _temporary_memory_paths():
+            chat_memory.ensure_chat_memory_dirs()
+            chat_memory.CHAT_MEMORY_FILE.write_text("memory", encoding="utf-8")
+            (chat_memory.ACTIVE_SESSION_DIR / "active.json").write_text("{}", encoding="utf-8")
+            (chat_memory.ARCHIVE_SESSION_DIR / "archived.json").write_text("{}", encoding="utf-8")
+            (chat_memory.ARCHIVE_SESSION_DIR / "keep.txt").write_text("not a session", encoding="utf-8")
+
+            result = chat_memory.clear_chat_memory()
+
+            self.assertFalse(chat_memory.CHAT_MEMORY_FILE.exists())
+            self.assertFalse((chat_memory.ACTIVE_SESSION_DIR / "active.json").exists())
+            self.assertFalse((chat_memory.ARCHIVE_SESSION_DIR / "archived.json").exists())
+            self.assertTrue((chat_memory.ARCHIVE_SESSION_DIR / "keep.txt").exists())
+
+        self.assertTrue(result["summary_removed"])
+        self.assertEqual(result["active_sessions_removed"], 1)
+        self.assertEqual(result["archived_sessions_removed"], 1)
+
+    def test_select_summary_rag_context_returns_relevant_memory_chunks(self):
+        memory_text = "\n\n".join(
+            [
+                "The user's favorite database is PostgreSQL.",
+                "The user's name is Relevant Memory User.",
+                "The user likes short API examples.",
+            ]
+        )
+        transcript = "USER: What is my name?\nASSISTANT: Your name is Relevant Memory User."
+
+        selected = chat_memory.select_summary_rag_context(memory_text, transcript, 80)
+
+        self.assertIn("Relevant Memory User", selected)
+        self.assertNotIn("PostgreSQL", selected)
 
     def test_summarize_stale_sessions_only_processes_old_pending_files(self):
         with _temporary_memory_paths():
@@ -121,6 +201,67 @@ class ChatMemoryTests(unittest.TestCase):
 
         self.assertIn("## Session Goal", summary)
         self.assertEqual(mocked_post.call_count, 1)
+
+    def test_summarize_chat_session_uses_configured_summary_prompt(self):
+        captured_payload = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"message": {"content": "## Important Facts\nCustom prompt used."}}
+
+        def fake_post(_url, json, timeout):
+            captured_payload.update(json)
+            return FakeResponse()
+
+        with patch("chat_memory.requests.post", side_effect=fake_post):
+            chat_memory.summarize_chat_session(
+                "http://ollama:11434",
+                "gemma4:e2b",
+                [{"role": "user", "content": "hello"}],
+                "general",
+                "CUSTOM SUMMARY PROMPT TEXT",
+            )
+
+        self.assertEqual(captured_payload["messages"][0]["content"], "CUSTOM SUMMARY PROMPT TEXT")
+
+    def test_summarize_chat_session_sends_existing_memory_rag_context(self):
+        captured_payload = {}
+
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"message": {"content": "## Important Facts\nThe user's name is RAG User."}}
+
+        def fake_post(_url, json, timeout):
+            captured_payload.update(json)
+            return FakeResponse()
+
+        with _temporary_memory_paths():
+            chat_memory.ensure_chat_memory_dirs()
+            chat_memory.CHAT_MEMORY_FILE.write_text(
+                "The user's name is RAG User.\n\nThe user's favorite shell is bash.",
+                encoding="utf-8",
+            )
+
+            with patch("chat_memory.requests.post", side_effect=fake_post):
+                summary = chat_memory.summarize_chat_session(
+                    "http://ollama:11434",
+                    "gemma4:e2b",
+                    [{"role": "user", "content": "My name is RAG User."}],
+                    "general",
+                )
+
+        self.assertIn("RAG User", summary)
+        user_prompt = captured_payload["messages"][-1]["content"]
+        self.assertIn("Existing relevant long-term memory notes", user_prompt)
+        self.assertIn("RAG User", user_prompt)
+        self.assertIn("Recent finished chat transcript", user_prompt)
+        self.assertNotIn("Task mode:", user_prompt)
 
 
 @contextmanager

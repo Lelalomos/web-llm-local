@@ -32,6 +32,7 @@ class ConfigStoreTests(unittest.TestCase):
                 "meilisearch_index": "web_search_results",
                 "meilisearch_timeout_seconds": 3,
                 "chat_max_continuations": 1,
+                "chat_summary_prompt": "Summarize memory using this custom prompt.",
                 "task_mode_interpreter_enabled": True,
                 "task_mode_interpreter_model": "qwen2.5:0.5b",
                 "task_mode_interpreter_timeout_seconds": 8,
@@ -68,6 +69,10 @@ class ConfigStoreTests(unittest.TestCase):
     def test_validate_app_config_rejects_invalid_ocr_engine(self):
         with self.assertRaisesRegex(Exception, "ocr_engine must be"):
             validate_app_config({"ocr_engine": "bad_engine"})
+
+    def test_validate_app_config_rejects_empty_chat_summary_prompt(self):
+        with self.assertRaisesRegex(Exception, "chat_summary_prompt must be"):
+            validate_app_config({"chat_summary_prompt": ""})
 
 
 if __name__ == "__main__":

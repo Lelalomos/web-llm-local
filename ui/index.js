@@ -25,6 +25,7 @@ const configModalBackdrop = document.getElementById("config-modal-backdrop");
 const closeConfigButton = document.getElementById("close-config-button");
 const configEditor = document.getElementById("config-editor");
 const saveConfigButton = document.getElementById("save-config-button");
+const clearMemoryButton = document.getElementById("clear-memory-button");
 const configStatus = document.getElementById("config-status");
 
 // New DOM Elements for Document Chat and Search
@@ -180,6 +181,9 @@ function setupConfigModalEventListeners() {
     if (configModalBackdrop) {
         configModalBackdrop.addEventListener("click", closeConfigModal);
     }
+    if (clearMemoryButton) {
+        clearMemoryButton.addEventListener("click", clearChatMemoryFromServer);
+    }
 }
 
 function syncWebSearchToggle() {
@@ -296,6 +300,33 @@ async function saveConfigToServer() {
         alert(`Error saving config: ${error.message}`);
     } finally {
         saveConfigButton.disabled = false;
+    }
+}
+
+async function clearChatMemoryFromServer() {
+    if (!confirm("Delete all saved chat memory and archived chat history? This cannot be undone.")) {
+        return;
+    }
+
+    setConfigStatus("Clearing chat memory...");
+    clearMemoryButton.disabled = true;
+
+    try {
+        const response = await window.fetchApi("/api/chat/memory", { method: "DELETE" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.detail || "Clear chat memory failed");
+        }
+
+        setConfigStatus(
+            `Chat memory cleared. Removed ${payload.active_sessions_removed || 0} active and ${payload.archived_sessions_removed || 0} archived sessions.`
+        );
+    } catch (error) {
+        console.error(error);
+        setConfigStatus(`Clear chat memory failed: ${error.message}`);
+        alert(`Error clearing chat memory: ${error.message}`);
+    } finally {
+        clearMemoryButton.disabled = false;
     }
 }
 
@@ -888,10 +919,7 @@ async function handleSend() {
         apiMessages.push({ role: "system", content: systemInstruction });
     }
     
-    // Uploaded-file prompts are isolated from prior chat turns.
-    if (!activeFile) {
-        chatHistory.forEach(msg => apiMessages.push(msg));
-    }
+    chatHistory.forEach(msg => apiMessages.push(msg));
     
     // Construct final user prompt with file text if attached
     const finalPromptContent = window.buildFinalPrompt(text, activeFileName, activeFileText);

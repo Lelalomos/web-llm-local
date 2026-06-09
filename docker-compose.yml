@@ -33,6 +33,9 @@ services:
       - SEARXNG_URL=http://searxng:8080
       - MEILI_URL=http://meilisearch:7700
       - DEFAULT_OLLAMA_MODEL=${DEFAULT_OLLAMA_MODEL:-gemma2:2b}
+      - CHAT_MEMORY_PROMPT_CHARS=${CHAT_MEMORY_PROMPT_CHARS:-12000}
+      - CHAT_MEMORY_SUMMARY_RAG_ENABLED=${CHAT_MEMORY_SUMMARY_RAG_ENABLED:-true}
+      - CHAT_MEMORY_SUMMARY_RAG_CHARS=${CHAT_MEMORY_SUMMARY_RAG_CHARS:-6000}
       - OLLAMA_FORCE_NUM_GPU=${OLLAMA_FORCE_NUM_GPU:-999}
       - OLLAMA_DEFAULT_NUM_CTX=${OLLAMA_DEFAULT_NUM_CTX:-2048}
       - OLLAMA_DEFAULT_NUM_BATCH=${OLLAMA_DEFAULT_NUM_BATCH:-128}
@@ -50,6 +53,8 @@ services:
       - PDF_FAST_TEXT_MIN_CHARS=${PDF_FAST_TEXT_MIN_CHARS:-1000}
     volumes:
       - ./backend:/app
+      - ./data:/data
+      - ./skill:/skill
       - ./test:/test:ro
     depends_on:
       - ollama

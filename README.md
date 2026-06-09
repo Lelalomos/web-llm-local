@@ -26,7 +26,7 @@ Docker-based local AI chat studio with Ollama, a FastAPI gateway, a browser UI, 
 - Upload progress status while OCR or parsing is running.
 - Uploaded-file prompts are isolated from earlier chat history.
 - Persistent chat memory with idle-session summaries and future prompt injection.
-- Optional skill markdown injection from `backend/skill/*.md`.
+- Optional skill markdown injection from `skill/*.md`.
 
 ## Feature Screenshots
 
@@ -238,9 +238,9 @@ The backend stores active chat sessions, summarizes idle sessions, and injects l
 
 Memory files:
 
-- `backend/data/chat_memory/summary_notes.md`
-- `backend/data/chat_memory/active_sessions/*.json`
-- `backend/data/chat_memory/sessions/*.json`
+- `data/chat_memory/summary_notes.md`
+- `data/chat_memory/active_sessions/*.json`
+- `data/chat_memory/sessions/*.json`
 
 Default idle timeout is `900` seconds.
 

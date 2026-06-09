@@ -6,7 +6,7 @@ from copy import deepcopy
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
-from chat_memory import finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
+from chat_memory import clear_chat_memory, finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
 from config_store import load_app_config, save_app_config
 from document_utils import extract_document_text_with_metadata
 from intent_router import infer_chat_intent
@@ -239,7 +239,8 @@ def _run_pending_summaries(current_session_id: str | None = None) -> None:
         return
 
     try:
-        summarize_stale_sessions(OLLAMA_URL, current_session_id)
+        app_config = load_app_config()
+        summarize_stale_sessions(OLLAMA_URL, current_session_id, str(app_config.get("chat_summary_prompt", "")))
     finally:
         summary_worker_lock.release()
 
@@ -424,7 +425,7 @@ def _complete_non_stream_chat(payload: dict, task_mode: str, search_used: bool, 
     return response_json
 
 
-def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str, search_used: bool, max_continuations: int):
+def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str, persisted_messages: list[dict], search_used: bool, max_continuations: int):
     current_payload = deepcopy(payload)
     current_payload["stream"] = True
     final_response_json = {}
@@ -470,7 +471,7 @@ def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str, search_u
         session_id,
         str(payload.get("model", "")),
         task_mode,
-        list(payload.get("messages", [])),
+        persisted_messages,
         "".join(full_response_parts),
     )
 
@@ -478,7 +479,8 @@ def _stream_chat_chunks(payload: dict, task_mode: str, session_id: str, search_u
 def chat(payload: dict = Body(...)):
     app_config = load_app_config()
     _apply_default_model(payload, app_config)
-    model, session_id, _, _ = _normalize_session_payload(payload)
+    model, session_id, messages, _ = _normalize_session_payload(payload)
+    persisted_messages = deepcopy(messages)
     payload.pop("session_id", None)
     _apply_config_defaults(payload, app_config)
     apply_gpu_defaults(payload)
@@ -488,8 +490,7 @@ def chat(payload: dict = Body(...)):
     _apply_document_chat_defaults(payload)
     _apply_thinking_defaults(payload)
     task_mode = apply_task_mode(payload)
-    if not is_document_prompt:
-        inject_memory_context(payload)
+    inject_memory_context(payload)
     if not is_document_prompt and app_config.get("skill_markdown_enabled", True):
         inject_skill_context(payload, int(app_config.get("skill_prompt_max_chars", 0) or 0))
 
@@ -506,7 +507,7 @@ def chat(payload: dict = Body(...)):
             def generate_stream():
                 yield _search_status_line(search_used)
                 try:
-                    for line in _stream_chat_chunks(payload, task_mode, session_id, search_used, max_continuations):
+                    for line in _stream_chat_chunks(payload, task_mode, session_id, persisted_messages, search_used, max_continuations):
                         yield line
                 except requests.exceptions.RequestException as e:
                     yield _stream_error_line(f"Ollama connection error: {e}")
@@ -520,7 +521,7 @@ def chat(payload: dict = Body(...)):
                 session_id,
                 model,
                 task_mode,
-                list(payload.get("messages", [])),
+                persisted_messages,
                 str(response_json.get("message", {}).get("content", "")),
             )
             return response_json
@@ -534,13 +535,14 @@ def end_chat(payload: dict = Body(...)):
     model, session_id, messages, task_mode = _normalize_session_payload(payload)
 
     try:
+        app_config = load_app_config()
         session_payload = load_active_session(session_id) or {
             "session_id": session_id,
             "model": model,
             "task_mode": task_mode,
             "messages": messages,
         }
-        result = finalize_session(session_payload, OLLAMA_URL)
+        result = finalize_session(session_payload, OLLAMA_URL, str(app_config.get("chat_summary_prompt", "")))
         return {
             "session_id": session_id,
             "summary": result["summary"],
@@ -549,3 +551,11 @@ def end_chat(payload: dict = Body(...)):
         }
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=503, detail=f"Ollama connection error: {e}")
+
+
+@app.delete("/api/chat/memory")
+def delete_chat_memory():
+    return {
+        "status": "cleared",
+        **clear_chat_memory(),
+    }
