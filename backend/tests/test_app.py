@@ -19,6 +19,7 @@ from app import (
     _ollama_json_request,
     _search_requested,
     _search_status_line,
+    _should_inject_memory_context,
     _stream_error_line,
     _should_continue_response,
     chat,
@@ -286,7 +287,7 @@ class AppSearchIntegrationTests(unittest.TestCase):
 
         self.assertFalse(payload["think"])
 
-    def test_document_chat_uses_memory_but_skips_summary_and_skill_context(self):
+    def test_document_chat_skips_memory_by_config_and_skips_summary_and_skill_context(self):
         payload = {
             "model": "gemma2:2b",
             "stream": False,
@@ -299,13 +300,32 @@ class AppSearchIntegrationTests(unittest.TestCase):
             ],
         }
 
-        with patch("app.load_app_config", return_value={"default_web_search_mode": "auto", "skill_markdown_enabled": True}), patch("app._run_pending_summaries") as summaries_mock, patch("app.inject_memory_context") as memory_mock, patch("app.inject_skill_context") as skill_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "summary"}}), patch("app._persist_completed_chat"):
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "auto", "skill_markdown_enabled": True, "memory_used": {"upload_file": False}}), patch("app._run_pending_summaries") as summaries_mock, patch("app.inject_memory_context") as memory_mock, patch("app.inject_skill_context") as skill_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "summary"}}), patch("app._persist_completed_chat"):
             response = chat(payload)
 
         self.assertEqual(response["message"]["content"], "summary")
         summaries_mock.assert_not_called()
-        memory_mock.assert_called_once()
+        memory_mock.assert_not_called()
         skill_mock.assert_not_called()
+
+    def test_document_chat_uses_memory_when_upload_file_config_enabled(self):
+        payload = {
+            "model": "gemma2:2b",
+            "stream": False,
+            "session_id": "doc-session",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": 'Context from uploaded file "report.pdf":\n\n--- START OF FILE CONTENT ---\nhello\n--- END OF FILE CONTENT ---\n\nUse the file content above to answer this prompt: Summarize this document.',
+                }
+            ],
+        }
+
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "auto", "skill_markdown_enabled": False, "memory_used": {"upload_file": True}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "summary"}}), patch("app._persist_completed_chat"):
+            response = chat(payload)
+
+        self.assertEqual(response["message"]["content"], "summary")
+        memory_mock.assert_called_once()
 
     def test_general_chat_uses_memory_context(self):
         payload = {
@@ -315,11 +335,70 @@ class AppSearchIntegrationTests(unittest.TestCase):
             "messages": [{"role": "user", "content": "remember my name?"}],
         }
 
-        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "answer"}}), patch("app._persist_completed_chat"):
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "memory_used": {"general": True}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "answer"}}), patch("app._persist_completed_chat"):
             response = chat(payload)
 
         self.assertEqual(response["message"]["content"], "answer")
         memory_mock.assert_called_once()
+
+    def test_code_writer_chat_uses_memory_when_config_enabled(self):
+        payload = {
+            "model": "gemma2:2b",
+            "stream": False,
+            "session_id": "code-session",
+            "task_mode": "code_writer",
+            "web_search_mode": "off",
+            "messages": [{"role": "user", "content": "write rust api client code"}],
+        }
+
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "memory_used": {"code_writer": True}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "code"}}), patch("app._persist_completed_chat"):
+            response = chat(payload)
+
+        self.assertEqual(response["message"]["content"], "code")
+        memory_mock.assert_called_once()
+
+    def test_code_writer_chat_skips_memory_when_config_disabled(self):
+        payload = {
+            "model": "gemma2:2b",
+            "stream": False,
+            "session_id": "code-session",
+            "task_mode": "code_writer",
+            "web_search_mode": "off",
+            "messages": [{"role": "user", "content": "write rust api client code"}],
+        }
+
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "memory_used": {"code_writer": False}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "code"}}), patch("app._persist_completed_chat"):
+            response = chat(payload)
+
+        self.assertEqual(response["message"]["content"], "code")
+        memory_mock.assert_not_called()
+
+    def test_web_search_chat_skips_memory_context(self):
+        payload = {
+            "model": "gemma2:2b",
+            "stream": False,
+            "session_id": "search-session",
+            "web_search_mode": "on",
+            "messages": [{"role": "user", "content": "get news stock data in US"}],
+        }
+
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "auto", "skill_markdown_enabled": False, "memory_used": {"general": True}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._inject_search_context", return_value=True), patch("app._complete_non_stream_chat", return_value={"message": {"content": "stock news"}}), patch("app._persist_completed_chat"):
+            response = chat(payload)
+
+        self.assertEqual(response["message"]["content"], "stock news")
+        memory_mock.assert_not_called()
+
+    def test_memory_context_policy(self):
+        config = {"memory_used": {"general": True, "code_writer": True, "code_reviewer": True, "code_editor": False, "bug_fixer": False, "upload_file": False}}
+
+        self.assertTrue(_should_inject_memory_context("general", False, config))
+        self.assertTrue(_should_inject_memory_context("code_writer", False, config))
+        self.assertTrue(_should_inject_memory_context("code_reviewer", False, config))
+        self.assertFalse(_should_inject_memory_context("code_editor", False, config))
+        self.assertFalse(_should_inject_memory_context("bug_fixer", False, config))
+        self.assertFalse(_should_inject_memory_context("general", True, config))
+        self.assertFalse(_should_inject_memory_context("general", False, config, True))
+        self.assertTrue(_should_inject_memory_context("general", False, {"memory_used": {"upload_file": True}}, True))
 
     def test_chat_reads_all_skill_files_before_answer(self):
         captured_payloads = []

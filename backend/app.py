@@ -312,6 +312,21 @@ def _inject_search_context(payload: dict, web_search_enabled: bool, app_config: 
     return True
 
 
+def _should_inject_memory_context(task_mode: str, web_search_enabled: bool, app_config: dict, is_document_prompt: bool = False) -> bool:
+    if web_search_enabled:
+        return False
+
+    memory_used = app_config.get("memory_used", {})
+    if is_document_prompt:
+        if isinstance(memory_used, dict) and "upload_file" in memory_used:
+            return bool(memory_used.get("upload_file"))
+        return False
+
+    if isinstance(memory_used, dict) and task_mode in memory_used:
+        return bool(memory_used.get(task_mode))
+    return task_mode == "general"
+
+
 @app.post("/api/task-mode/infer")
 def infer_task_mode(payload: dict = Body(...)):
     app_config = load_app_config()
@@ -490,13 +505,14 @@ def chat(payload: dict = Body(...)):
     _apply_document_chat_defaults(payload)
     _apply_thinking_defaults(payload)
     task_mode = apply_task_mode(payload)
-    inject_memory_context(payload)
     if not is_document_prompt and app_config.get("skill_markdown_enabled", True):
         inject_skill_context(payload, int(app_config.get("skill_prompt_max_chars", 0) or 0))
 
     # 1. Check if Web Search is requested
     direct_context_used = _inject_direct_url_context(payload, app_config)
     web_search_enabled = _search_requested(payload, app_config, task_mode, direct_context_used)
+    if _should_inject_memory_context(task_mode, web_search_enabled, app_config, is_document_prompt):
+        inject_memory_context(payload)
     search_used = _inject_search_context(payload, web_search_enabled, app_config)
     max_continuations = int(app_config.get("chat_max_continuations", 0) or 0)
                     

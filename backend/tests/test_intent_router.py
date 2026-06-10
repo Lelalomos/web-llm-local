@@ -99,6 +99,34 @@ class IntentRouterTests(unittest.TestCase):
         self.assertEqual(intent["task_mode"], "code_writer")
         self.assertFalse(intent["web_search"])
 
+    def test_infer_chat_intent_keeps_code_fallback_when_model_says_general(self):
+        class FakeResponse:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {
+                    "message": {
+                        "content": '{"task_mode":"general","web_search":false,"search_query":"rust api"}'
+                    }
+                }
+
+        with patch("intent_router.requests.post", return_value=FakeResponse()):
+            intent = infer_chat_intent(
+                "http://ollama:11434",
+                "i test send write api with rust language into chat it can't write code",
+                "general",
+                {
+                    "task_mode_interpreter_enabled": True,
+                    "task_mode_interpreter_model": "gemma2:2b",
+                    "task_mode_interpreter_timeout_seconds": 30,
+                },
+            )
+
+        self.assertEqual(intent["task_mode"], "code_writer")
+        self.assertFalse(intent["web_search"])
+        self.assertEqual(intent["source"], "model")
+
     def test_infer_chat_intent_preserves_fallback_search_when_model_says_false(self):
         class FakeResponse:
             def raise_for_status(self):

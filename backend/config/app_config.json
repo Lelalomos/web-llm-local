@@ -14,6 +14,14 @@
   "meilisearch_index": "web_search_results",
   "meilisearch_timeout_seconds": 3,
   "chat_max_continuations": 4,
+  "memory_used": {
+    "general": true,
+    "code_writer": false,
+    "code_reviewer": false,
+    "code_editor": false,
+    "bug_fixer": false,
+    "upload_file": false
+  },
   "chat_summary_prompt": "You are creating persistent memory notes about the user. Write a detailed markdown summary with these sections exactly: ## Session Goal, ## Important Facts, ## User Preferences, ## Personal Style, ## Open Questions, ## Useful Follow-ups. Keep it factual. Do not invent details. Include concrete details that would help future chats understand the user better. Do not include session ids, model names, task mode names, timestamps, or backend metadata.",
   "task_mode_interpreter_enabled": true,
   "task_mode_interpreter_model": "gemma2:2b",

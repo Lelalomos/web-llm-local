@@ -101,6 +101,13 @@ def normalize_search_query(query: str) -> str:
     ]):
         return "SET index Thailand stock news"
 
+    if (
+        any(k in search_query for k in ["stock", "stocks", "market", "markets"])
+        and any(k in search_query for k in ["us", "u.s.", "usa", "united states"])
+        and any(k in search_query for k in ["news", "today", "latest", "current", "data"])
+    ):
+        return "latest US stock market news today"
+
     return search_query
 
 
@@ -236,6 +243,12 @@ def score_search_result(result: dict, query: str) -> int:
         score += 2
 
     score += _recency_score(result)
+
+    parsed_path = parsed.path.rstrip("/")
+    is_homepage = parsed_path in {"", "/"}
+    is_news_query = any(term in query.lower() for term in ("news", "stock", "stocks", "market", "markets", "finance", "today", "latest"))
+    if is_news_query and is_homepage and _parse_recent_datetime(f"{title} {body}") is None:
+        score -= 8
 
     return score
 

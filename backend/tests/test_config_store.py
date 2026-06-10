@@ -32,6 +32,14 @@ class ConfigStoreTests(unittest.TestCase):
                 "meilisearch_index": "web_search_results",
                 "meilisearch_timeout_seconds": 3,
                 "chat_max_continuations": 1,
+                "memory_used": {
+                    "general": True,
+                    "code_writer": True,
+                    "code_reviewer": True,
+                    "code_editor": False,
+                    "bug_fixer": False,
+                    "upload_file": False,
+                },
                 "chat_summary_prompt": "Summarize memory using this custom prompt.",
                 "task_mode_interpreter_enabled": True,
                 "task_mode_interpreter_model": "qwen2.5:0.5b",
@@ -73,6 +81,19 @@ class ConfigStoreTests(unittest.TestCase):
     def test_validate_app_config_rejects_empty_chat_summary_prompt(self):
         with self.assertRaisesRegex(Exception, "chat_summary_prompt must be"):
             validate_app_config({"chat_summary_prompt": ""})
+
+    def test_validate_app_config_accepts_partial_memory_used(self):
+        config = validate_app_config({"memory_used": {"general": True, "code_writer": True, "upload_file": False}})
+
+        self.assertEqual(config["memory_used"], {"general": True, "code_writer": True, "upload_file": False})
+
+    def test_validate_app_config_rejects_unknown_memory_task_mode(self):
+        with self.assertRaisesRegex(Exception, "memory_used has unknown task modes"):
+            validate_app_config({"memory_used": {"general": True, "bad_mode": False}})
+
+    def test_validate_app_config_rejects_non_boolean_memory_value(self):
+        with self.assertRaisesRegex(Exception, "memory_used.general must be a boolean"):
+            validate_app_config({"memory_used": {"general": "yes"}})
 
 
 if __name__ == "__main__":

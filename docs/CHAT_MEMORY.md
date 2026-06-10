@@ -46,8 +46,32 @@ The model is asked to write these sections:
 - active unsummarized chats live in `active_sessions/`
 - the memory file is trimmed before prompt injection so it does not grow without limit inside the prompt
 - the default injected memory window is `12000` characters and can be changed with `CHAT_MEMORY_PROMPT_CHARS`
+- prompt memory injection is controlled per task mode by `memory_used` in `backend/config/app_config.json`
+- uploaded-file requests use the `memory_used.upload_file` setting and default to not injecting saved summary memory
+- web-search requests do not inject saved summary memory even when their task mode is enabled in `memory_used`
 - summary generation can read relevant old memory notes before summarizing the recent chat
 - summary memory retrieval is controlled by `CHAT_MEMORY_SUMMARY_RAG_ENABLED` and `CHAT_MEMORY_SUMMARY_RAG_CHARS`
 - the prompt used to ask the model for memory summaries is configured with `chat_summary_prompt` in the app config popup
 - saved chat memory and raw history can be removed with the app config popup or `DELETE /api/chat/memory`
 - the default idle timeout is `900` seconds
+
+## Task Mode Memory Config
+
+Configure which task modes can read saved summary memory:
+
+```json
+{
+  "memory_used": {
+    "general": true,
+    "code_writer": true,
+    "code_reviewer": true,
+    "code_editor": false,
+    "bug_fixer": false,
+    "upload_file": false
+  }
+}
+```
+
+Supported task mode keys are `general`, `code_writer`, `code_reviewer`, `code_editor`, and `bug_fixer`.
+Uploaded-file requests use the special `upload_file` key.
+Each task mode is controlled separately.

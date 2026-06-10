@@ -20,6 +20,9 @@ class SearchPolicyTests(unittest.TestCase):
     def test_query_normalizer_maps_thai_stock_queries(self):
         self.assertEqual(normalize_search_query("หุ้นไทยล่าสุด"), "SET index Thailand stock news")
 
+    def test_query_normalizer_maps_us_stock_news_queries(self):
+        self.assertEqual(normalize_search_query("get news stock data in US"), "latest US stock market news today")
+
     def test_ranking_prefers_trusted_matching_sources(self):
         ranked = rank_search_results(
             [
@@ -40,6 +43,26 @@ class SearchPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(ranked[0]["href"], "https://example.com/new")
+
+    def test_ranking_prefers_dated_stock_news_over_generic_homepage(self):
+        ranked = rank_search_results(
+            [
+                {
+                    "title": "Nasdaq: Stock Market, Data Updates, Reports & News",
+                    "href": "https://www.nasdaq.com/",
+                    "body": "Get the latest stock market news and stock information.",
+                },
+                {
+                    "title": "Stock Market Today: Stock Market News And Analysis (Tue, 09 Jun 2026 17:00:00 GMT)",
+                    "href": "https://www.investors.com/news/stock-market-today-stock-market-news/",
+                    "body": "Stock Market Today: Stock Market News And Analysis",
+                },
+            ],
+            "latest US stock market news today",
+        )
+
+        self.assertEqual(ranked[0]["href"], "https://www.investors.com/news/stock-market-today-stock-market-news/")
+
 
     def test_dedupe_search_results_removes_duplicate_urls(self):
         deduped = dedupe_search_results(

@@ -11,6 +11,8 @@ CONFIG_PATH = CONFIG_DIR / "app_config.json"
 ALLOWED_WEB_SEARCH_MODES = {"auto", "on", "off"}
 ALLOWED_SEARCH_PROVIDERS = {"auto", "searxng", "legacy"}
 ALLOWED_OCR_ENGINES = {"auto", "tesseract", "qwen_vl", "surya_docling"}
+ALLOWED_TASK_MODES = {"general", "code_writer", "code_reviewer", "code_editor", "bug_fixer"}
+ALLOWED_MEMORY_USED_KEYS = ALLOWED_TASK_MODES | {"upload_file"}
 
 DEFAULT_APP_CONFIG = {
     "default_model": "gemma4:e2b",
@@ -28,6 +30,14 @@ DEFAULT_APP_CONFIG = {
     "meilisearch_index": "web_search_results",
     "meilisearch_timeout_seconds": 3,
     "chat_max_continuations": 4,
+    "memory_used": {
+        "general": True,
+        "code_writer": True,
+        "code_reviewer": True,
+        "code_editor": False,
+        "bug_fixer": False,
+        "upload_file": False,
+    },
     "chat_summary_prompt": (
         "You are creating persistent memory notes about the user. "
         "Write a detailed markdown summary with these sections exactly: "
@@ -87,6 +97,19 @@ def _validate_default_options(default_options: dict) -> None:
             raise HTTPException(status_code=400, detail=f"default_options.{key} has an unsupported value type")
 
 
+def _validate_memory_used(memory_used: dict) -> None:
+    if not isinstance(memory_used, dict):
+        raise HTTPException(status_code=400, detail="memory_used must be an object")
+
+    unknown_modes = sorted(set(memory_used.keys()) - ALLOWED_MEMORY_USED_KEYS)
+    if unknown_modes:
+        raise HTTPException(status_code=400, detail=f"memory_used has unknown task modes: {', '.join(unknown_modes)}")
+
+    for task_mode, enabled in memory_used.items():
+        if not isinstance(enabled, bool):
+            raise HTTPException(status_code=400, detail=f"memory_used.{task_mode} must be a boolean")
+
+
 def validate_app_config(candidate: dict) -> dict:
     if not isinstance(candidate, dict):
         raise HTTPException(status_code=400, detail="config payload must be a JSON object")
@@ -129,6 +152,7 @@ def validate_app_config(candidate: dict) -> dict:
     _require_int(normalized, "skill_prompt_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "web_search_context_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "chat_max_continuations", minimum=0, maximum=5)
+    _validate_memory_used(normalized.get("memory_used"))
     if not isinstance(normalized.get("chat_summary_prompt"), str) or not normalized.get("chat_summary_prompt").strip():
         raise HTTPException(status_code=400, detail="chat_summary_prompt must be a non-empty string")
     if not isinstance(normalized.get("task_mode_interpreter_enabled"), bool):

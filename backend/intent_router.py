@@ -84,6 +84,10 @@ def _normalize_model_intent(raw_intent: dict[str, Any], prompt: str, current_tas
         return None
 
     fallback = fallback_intent(prompt, current_task_mode)
+    fallback_task_mode_value = str(fallback.get("task_mode", "general"))
+    if fallback_task_mode_value != "general" and task_mode == "general":
+        task_mode = fallback_task_mode_value
+
     search_query = str(raw_intent.get("search_query", "")).strip()
     if not search_query:
         search_query = fallback["search_query"]
