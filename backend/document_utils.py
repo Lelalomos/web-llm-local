@@ -22,7 +22,8 @@ SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md", ".json", ".csv"}
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls"} | SUPPORTED_TEXT_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS
 DEFAULT_SUMMARY_PROMPT = "Summarize this document and highlight the key points."
-MAX_DOCUMENT_PROMPT_CHARS = 5000
+MAX_DOCUMENT_PROMPT_CHARS = 20000
+DOCUMENT_CHAT_NUM_CTX = int(os.getenv("DOCUMENT_CHAT_NUM_CTX", "8192"))
 PDF_OCR_LANGUAGE = os.getenv("PDF_OCR_LANGUAGE", "eng")
 IMAGE_OCR_LANGUAGE = os.getenv("IMAGE_OCR_LANGUAGE", PDF_OCR_LANGUAGE)
 PDF_OCR_DPI = int(os.getenv("PDF_OCR_DPI", "200"))
@@ -87,6 +88,9 @@ def build_document_prompt(file_name: str, file_text: str, user_prompt: str) -> s
 
 def _extract_pdf_text(content: bytes, filename: str = "document.pdf", app_config: dict | None = None, ollama_url: str | None = None) -> str:
     extraction_mode = _pdf_extraction_mode(app_config or {})
+    if extraction_mode == "page_image_ocr":
+        return _extract_pdf_text_with_page_image_ocr(content, filename, app_config or {}, ollama_url)
+
     if extraction_mode == "qwen_vl":
         return _extract_pdf_text_with_vision_ocr(content, app_config or {}, ollama_url)
 
@@ -106,6 +110,12 @@ def _extract_pdf_text(content: bytes, filename: str = "document.pdf", app_config
 
 
 def _pdf_extraction_mode(app_config: dict) -> str:
+    configured_pdf_mode = str(app_config.get("pdf_extraction_mode") or "").strip()
+    if configured_pdf_mode == "auto":
+        configured_pdf_mode = ""
+    if configured_pdf_mode in {"surya_docling", "legacy", "qwen_vl", "page_image_ocr"}:
+        return configured_pdf_mode
+
     configured_engine = str(app_config.get("ocr_engine") or "").strip()
     if configured_engine in {"auto", "surya_docling"}:
         return "surya_docling"
@@ -114,6 +124,62 @@ def _pdf_extraction_mode(app_config: dict) -> str:
     if configured_engine == "tesseract":
         return "legacy"
     return PDF_EXTRACTION_MODE
+
+
+def _extract_pdf_text_with_page_image_ocr(content: bytes, filename: str, app_config: dict, ollama_url: str | None) -> str:
+    page_count = _pdf_page_count(content)
+    try:
+        vision_text = _extract_pdf_page_images_with_vision_ocr(content, app_config, ollama_url)
+        if _has_all_pdf_page_markers(vision_text, page_count):
+            return vision_text
+        if vision_text.strip():
+            raise RuntimeError(f"Qwen-VL OCR returned incomplete page text: expected {page_count} pages")
+    except Exception as exc:
+        print(f"[Document Parser] Qwen-VL PDF page-image OCR failed, trying Surya OCR: {exc}")
+
+    try:
+        surya_text = _extract_pdf_with_surya(content, filename)
+        if surya_text.strip():
+            combined_surya_text = "OCR Result (Surya)\n" + surya_text.strip()
+            if _has_all_pdf_page_markers(combined_surya_text, page_count):
+                return combined_surya_text
+            raise RuntimeError(f"Surya OCR returned incomplete page text: expected {page_count} pages")
+    except Exception as exc:
+        print(f"[Document Parser] Surya OCR fallback failed, trying Tesseract page-image OCR: {exc}")
+
+    return _extract_pdf_page_images_with_tesseract(content)
+
+
+def _pdf_page_count(content: bytes) -> int:
+    with pymupdf.open(stream=content, filetype="pdf") as document:
+        return document.page_count
+
+
+def _has_all_pdf_page_markers(text: str, page_count: int) -> bool:
+    if page_count <= 0:
+        return bool(text.strip())
+    return all(f"Page {page_number}" in text for page_number in range(1, page_count + 1))
+
+
+def _extract_pdf_page_images_with_vision_ocr(content: bytes, app_config: dict, ollama_url: str | None) -> str:
+    text_parts = []
+    with pymupdf.open(stream=content, filetype="pdf") as document:
+        for page_index in range(document.page_count):
+            image_bytes = _render_pdf_page_to_jpg(document.load_page(page_index))
+            text = _extract_image_text_with_vision_model(image_bytes, app_config, ollama_url).strip()
+            if text:
+                text_parts.append(f"Page {page_index + 1}\n{text}")
+    return "\n\n".join(text_parts)
+
+
+def _extract_pdf_page_images_with_tesseract(content: bytes) -> str:
+    text_parts = []
+    with pymupdf.open(stream=content, filetype="pdf") as document:
+        for page_index in range(document.page_count):
+            image_bytes = _render_pdf_page_to_jpg(document.load_page(page_index))
+            text = _extract_image_text_with_tesseract(image_bytes).strip()
+            text_parts.append(f"Page {page_index + 1}\n{text or '[No OCR text extracted]'}")
+    return "\n\n".join(text_parts)
 
 
 def _extract_pdf_text_with_vision_ocr(content: bytes, app_config: dict, ollama_url: str | None) -> str:
@@ -137,6 +203,14 @@ def _extract_pdf_text_with_vision_ocr(content: bytes, app_config: dict, ollama_u
 def _render_pdf_page_to_png(page) -> bytes:
     pixmap = page.get_pixmap(dpi=PDF_OCR_DPI, alpha=False)
     return pixmap.tobytes("png")
+
+
+def _render_pdf_page_to_jpg(page) -> bytes:
+    pixmap = page.get_pixmap(dpi=PDF_OCR_DPI, alpha=False)
+    with Image.open(io.BytesIO(pixmap.tobytes("png"))) as image:
+        buffer = io.BytesIO()
+        image.convert("RGB").save(buffer, format="JPEG", quality=95)
+        return buffer.getvalue()
 
 
 def _extract_pdf_embedded_text(content: bytes) -> str:

@@ -11,6 +11,7 @@ CONFIG_PATH = CONFIG_DIR / "app_config.json"
 ALLOWED_WEB_SEARCH_MODES = {"auto", "on", "off"}
 ALLOWED_SEARCH_PROVIDERS = {"auto", "searxng", "legacy"}
 ALLOWED_OCR_ENGINES = {"auto", "tesseract", "qwen_vl", "surya_docling"}
+ALLOWED_PDF_EXTRACTION_MODES = {"auto", "surya_docling", "legacy", "qwen_vl", "page_image_ocr"}
 ALLOWED_TASK_MODES = {"general", "code_writer", "code_reviewer", "code_editor", "bug_fixer"}
 ALLOWED_MEMORY_USED_KEYS = ALLOWED_TASK_MODES | {"upload_file"}
 
@@ -54,6 +55,7 @@ DEFAULT_APP_CONFIG = {
     "search_context_enhancer_timeout_seconds": 45,
     "search_context_enhancer_max_chars": 6000,
     "ocr_engine": "auto",
+    "pdf_extraction_mode": "page_image_ocr",
     "vision_ocr_model": "qwen3-vl:latest",
     "vision_ocr_timeout_seconds": 120,
     "vision_ocr_prompt": (
@@ -174,6 +176,8 @@ def validate_app_config(candidate: dict) -> dict:
     _require_int(normalized, "search_context_enhancer_max_chars", minimum=500, maximum=20000)
     if normalized.get("ocr_engine") not in ALLOWED_OCR_ENGINES:
         raise HTTPException(status_code=400, detail="ocr_engine must be auto, tesseract, qwen_vl, or surya_docling")
+    if normalized.get("pdf_extraction_mode") not in ALLOWED_PDF_EXTRACTION_MODES:
+        raise HTTPException(status_code=400, detail="pdf_extraction_mode must be auto, surya_docling, legacy, qwen_vl, or page_image_ocr")
     if not isinstance(normalized.get("vision_ocr_model"), str):
         raise HTTPException(status_code=400, detail="vision_ocr_model must be a string")
     if not MODEL_NAME_PATTERN.fullmatch(normalized.get("vision_ocr_model", "")):

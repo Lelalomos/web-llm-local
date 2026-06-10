@@ -16,10 +16,11 @@
 
 ## Current Behavior
 
-- PDF extraction defaults to the advanced `surya_docling` pipeline.
-- PDFs with enough embedded text use a fast embedded-text path before heavy Docling/Surya processing.
-- Docling parses the PDF into structured Markdown-style document text.
-- Surya OCR reads page text when Docling output is sparse, which avoids slow OCR on normal text PDFs.
+- PDF extraction defaults to the `page_image_ocr` pipeline.
+- In `page_image_ocr` mode, every PDF page is rendered to a JPG image first.
+- The backend OCRs each rendered JPG page, combines the page text in page order, and sends that combined text to the model.
+- The PDF OCR fallback priority is Qwen-VL page-image OCR, then Surya OCR, then Tesseract page-image OCR.
+- Other PDF modes are still available for debugging or performance tuning.
 - When `ocr_engine` is `qwen_vl`, scanned PDF pages and image uploads use the configured Ollama vision model for OCR.
 - The backend combines Docling parsing output and Surya OCR output before sending document context to the model.
 - If Docling or Surya fails or is unavailable, the backend falls back to the legacy PDF extractor.
@@ -31,15 +32,20 @@
 - Uploaded file content is wrapped into the final prompt sent to the model.
 - Uploaded-file chats include previous chat turns. Stored summary memory is controlled by `memory_used.upload_file` in `backend/config/app_config.json` and defaults to off so the uploaded file remains the main context.
 - The UI shows a collapsible `Original extraction` preview after upload and keeps that preview in the sent user message.
+- The extraction preview uses the same `20000` character limit as the document prompt and shows detected PDF page markers in the preview metadata when present.
 - While upload extraction is running, the UI shows a live `Still working` status with elapsed time so OCR/Docling work does not look frozen.
 - When the user sends the uploaded file to chat, the attachment preview above the input is cleared.
-- Large uploaded documents are truncated to the first `5000` characters before they are inserted into the chat prompt.
+- Large uploaded documents are truncated to the first `20000` characters before they are inserted into the chat prompt.
+- Uploaded-file chat requests use a larger default model context window so multi-page OCR text has room to reach the model.
 - If no prompt is typed after attaching a file, the default prompt is:
   - `Summarize this document and highlight the key points.`
 
 ## PDF OCR Notes
 
-- The default advanced pipeline uses Docling for document parsing and Surya for OCR.
+- The default pipeline is `page_image_ocr`, which converts every PDF page to JPG and OCRs each page image.
+- `pdf_extraction_mode` can be set to `page_image_ocr`, `qwen_vl`, `surya_docling`, `legacy`, or `auto`.
+- `page_image_ocr` tries Qwen-VL first, then Surya OCR, then Tesseract.
+- The advanced `surya_docling` pipeline uses Docling for document parsing and Surya for OCR.
 - Surya and Docling can be slower and heavier than the legacy extractor.
 - First use can download model weights.
 - Surya uses GPU when PyTorch can see a GPU in the backend container; CUDA/no-driver/out-of-memory failures retry on CPU before the legacy fallback.
@@ -47,8 +53,8 @@
 - `PDF_SURYA_MIN_DOCLING_CHARS` defaults to `1000`; when Docling extracts at least that much text, Surya is skipped for that PDF.
 - `PDF_FAST_TEXT_MIN_CHARS` defaults to `1000`; when embedded PDF text reaches that threshold, Docling/Surya is skipped for faster uploads.
 - The old Tesseract path remains as fallback.
-- Set `PDF_EXTRACTION_MODE=legacy` to force the old extractor.
-- Set `PDF_EXTRACTION_MODE=surya_docling` to use the default advanced extractor.
+- Set `pdf_extraction_mode` in `backend/config/app_config.json` to choose the app-level PDF pipeline.
+- `PDF_EXTRACTION_MODE` is only the environment fallback when the app config does not choose a PDF mode.
 
 ## Image OCR Notes
 

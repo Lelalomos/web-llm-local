@@ -6,9 +6,9 @@ from copy import deepcopy
 import requests
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
-from chat_memory import clear_chat_memory, finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
+from chat_memory import clear_chat_memory, extract_current_user_name, finalize_session, inject_memory_context, load_active_session, summarize_stale_sessions, upsert_active_session
 from config_store import load_app_config, save_app_config
-from document_utils import extract_document_text_with_metadata
+from document_utils import DOCUMENT_CHAT_NUM_CTX, extract_document_text_with_metadata
 from intent_router import infer_chat_intent
 from model_bootstrap import DEFAULT_OLLAMA_MODEL, ensure_default_model_available
 from ollama_options import apply_gpu_defaults
@@ -189,6 +189,34 @@ def _stream_error_line(message: str) -> str:
     return json.dumps({"type": "stream_error", "message": message}) + "\n"
 
 
+def _current_conversation_name_answer(messages: list[dict]) -> str:
+    if not messages:
+        return ""
+
+    latest_message = messages[-1]
+    if latest_message.get("role") != "user":
+        return ""
+
+    latest_content = str(latest_message.get("content", "")).lower()
+    if not any(phrase in latest_content for phrase in ("remember my name", "what is my name", "do you know my name")):
+        return ""
+
+    current_name = extract_current_user_name(messages[:-1])
+    if not current_name:
+        return ""
+    return f"Your name is {current_name}."
+
+
+def _deterministic_chat_response(model: str, content: str, search_used: bool = False) -> dict:
+    return {
+        "model": model,
+        "message": {"role": "assistant", "content": content},
+        "done": True,
+        "done_reason": "stop",
+        "search_used": search_used,
+    }
+
+
 def _is_document_prompt(payload: dict) -> bool:
     messages = payload.get("messages") or []
     if not messages:
@@ -205,6 +233,10 @@ def _is_document_prompt(payload: dict) -> bool:
 def _apply_document_chat_defaults(payload: dict) -> None:
     if _is_document_prompt(payload) and "think" not in payload:
         payload["think"] = False
+    if _is_document_prompt(payload):
+        options = payload.setdefault("options", {})
+        if not isinstance(options.get("num_ctx"), int) or options["num_ctx"] < DOCUMENT_CHAT_NUM_CTX:
+            options["num_ctx"] = DOCUMENT_CHAT_NUM_CTX
 
 
 def _apply_thinking_defaults(payload: dict) -> None:
@@ -516,10 +548,21 @@ def chat(payload: dict = Body(...)):
         inject_memory_context(payload, int(memory_prompt_max_chars) if memory_prompt_max_chars is not None else None)
     search_used = _inject_search_context(payload, web_search_enabled, app_config)
     max_continuations = int(app_config.get("chat_max_continuations", 0) or 0)
+    deterministic_answer = _current_conversation_name_answer(persisted_messages)
                     
     # 2. Forward request to Ollama
     stream = payload.get("stream", False)
     try:
+        if deterministic_answer:
+            _persist_completed_chat(session_id, model, task_mode, persisted_messages, deterministic_answer)
+            response_json = _deterministic_chat_response(model, deterministic_answer, search_used)
+            if stream:
+                def generate_deterministic_stream():
+                    yield _search_status_line(search_used)
+                    yield json.dumps(response_json) + "\n"
+                return StreamingResponse(generate_deterministic_stream(), media_type="application/x-ndjson")
+            return response_json
+
         if stream:
             def generate_stream():
                 yield _search_status_line(search_used)

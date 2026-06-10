@@ -17,6 +17,7 @@ from app import (
     _normalize_model_name,
     _normalize_session_payload,
     _ollama_json_request,
+    _current_conversation_name_answer,
     _search_requested,
     _search_status_line,
     _should_inject_memory_context,
@@ -264,6 +265,7 @@ class AppSearchIntegrationTests(unittest.TestCase):
         _apply_document_chat_defaults(payload)
 
         self.assertFalse(payload["think"])
+        self.assertEqual(payload["options"]["num_ctx"], 8192)
 
     def test_explicit_think_flag_is_preserved(self):
         payload = {
@@ -400,6 +402,36 @@ class AppSearchIntegrationTests(unittest.TestCase):
         self.assertFalse(_should_inject_memory_context("general", True, config))
         self.assertFalse(_should_inject_memory_context("general", False, config, True))
         self.assertTrue(_should_inject_memory_context("general", False, {"memory_used": {"upload_file": True}}, True))
+
+    def test_current_conversation_name_answer_uses_prior_user_name(self):
+        answer = _current_conversation_name_answer(
+            [
+                {"role": "user", "content": "hey i'am programmer and i'm mos what is your name?"},
+                {"role": "assistant", "content": "I am Gemma 4."},
+                {"role": "user", "content": "you remember my name?"},
+            ]
+        )
+
+        self.assertEqual(answer, "Your name is mos.")
+
+    def test_chat_answers_current_conversation_name_without_ollama(self):
+        payload = {
+            "model": "gemma2:2b",
+            "stream": False,
+            "session_id": "name-session",
+            "web_search_mode": "off",
+            "messages": [
+                {"role": "user", "content": "hey i'am programmer and i'm mos what is your name?"},
+                {"role": "assistant", "content": "I am Gemma 4."},
+                {"role": "user", "content": "you remember my name?"},
+            ],
+        }
+
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "memory_used": {"general": True}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context"), patch("app._complete_non_stream_chat") as ollama_mock, patch("app._persist_completed_chat"):
+            response = chat(payload)
+
+        self.assertEqual(response["message"]["content"], "Your name is mos.")
+        ollama_mock.assert_not_called()
 
     def test_chat_reads_all_skill_files_before_answer(self):
         captured_payloads = []

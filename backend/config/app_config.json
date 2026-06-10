@@ -32,6 +32,7 @@
   "search_context_enhancer_timeout_seconds": 45,
   "search_context_enhancer_max_chars": 6000,
   "ocr_engine": "qwen_vl",
+  "pdf_extraction_mode": "page_image_ocr",
   "vision_ocr_model": "qwen2.5vl:3b",
   "vision_ocr_timeout_seconds": 120,
   "vision_ocr_prompt": "Extract all visible text from this image. Preserve line breaks and table structure. Return only the extracted text. If the text is Thai, return Thai text exactly.",

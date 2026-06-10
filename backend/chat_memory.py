@@ -17,6 +17,17 @@ SUMMARY_RAG_ENABLED = os.getenv("CHAT_MEMORY_SUMMARY_RAG_ENABLED", "true").lower
 SUMMARY_RAG_MAX_CHARS = int(os.getenv("CHAT_MEMORY_SUMMARY_RAG_CHARS", "6000"))
 AUTO_SUMMARY_IDLE_SECONDS = int(os.getenv("CHAT_MEMORY_IDLE_SECONDS", "900"))
 DEFAULT_SESSION_ID = "session"
+NON_NAME_SELF_DESCRIPTIONS = {
+    "programmer",
+    "developer",
+    "engineer",
+    "student",
+    "teacher",
+    "designer",
+    "manager",
+    "admin",
+    "user",
+}
 MEMORY_RAG_STOPWORDS = {
     "user",
     "assistant",
@@ -58,11 +69,28 @@ def build_memory_system_prompt(memory_text: str) -> str:
     return (
         "Use the following long-term notes about the user to adapt your answers. "
         "Treat these notes as helpful memory, not as absolute truth if the current chat contradicts them. "
+        "The current conversation has highest priority. If the user states their name, role, preference, or other fact in the current messages, use that current fact even if older memory says it was unknown. "
         "Always follow the current request's topic, programming language, and output format over older memory notes. "
         "Prefer concrete remembered facts about the user, such as a stated name, over notes that only say the assistant did not know something. "
         "Do not treat a past assistant failure to remember as proof that the fact is unknown if another memory note contains the fact.\n\n"
         f"{memory_text}"
     )
+
+
+def extract_current_user_name(messages: list[dict]) -> str:
+    candidates = []
+    pattern = re.compile(
+        r"\b(?:my name is|call me|i\s*(?:am|'m|’m|'am|’am|m))\s+([A-Za-z][A-Za-z0-9_-]{1,40})\b",
+        re.IGNORECASE,
+    )
+    for message in messages or []:
+        if message.get("role") != "user":
+            continue
+        for match in pattern.finditer(str(message.get("content", ""))):
+            candidate = match.group(1).strip(".,!?;: ")
+            if candidate.lower() not in NON_NAME_SELF_DESCRIPTIONS:
+                candidates.append(candidate)
+    return candidates[-1] if candidates else ""
 
 
 def load_memory_text(max_chars: int | None = None, transcript: str = "") -> str:
@@ -94,11 +122,21 @@ def load_full_memory_text() -> str:
 
 
 def inject_memory_context(payload: dict, max_chars: int | None = None) -> bool:
-    memory_text = load_memory_text(max_chars, build_chat_transcript(payload.get("messages", [])))
+    messages = payload.get("messages", [])
+    memory_text = load_memory_text(max_chars, build_chat_transcript(messages))
     if not memory_text:
         return False
 
     memory_prompt = build_memory_system_prompt(memory_text)
+    current_user_name = extract_current_user_name(messages)
+    if current_user_name:
+        memory_prompt = (
+            "Current conversation facts have highest priority:\n"
+            f"- The user stated their name is {current_user_name} in this conversation.\n\n"
+            "If the user asks whether you remember their name and the current conversation facts include it, answer with that name. "
+            "Do not answer with a generic no-memory disclaimer for facts visible in the current conversation.\n\n"
+            f"{memory_prompt}"
+        )
     for message in payload.get("messages", []):
         if message.get("role") == "system":
             message["content"] = f"{memory_prompt}\n\n{message['content']}"

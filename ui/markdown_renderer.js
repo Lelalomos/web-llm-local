@@ -233,12 +233,37 @@ function renderMarkdown(text) {
         workingText = workingText.replace(/```(\w*)\n([\s\S]*)$/, placeholder);
     }
 
-    const blocks = workingText.split(/\n{2,}/);
-    let html = blocks
-        .map(block => block.trim())
-        .filter(Boolean)
-        .map(renderTextBlock)
-        .join("");
+    const blocks = workingText.split(/\n{2,}/).map(block => block.trim()).filter(Boolean);
+    const renderedBlocks = [];
+    let heuristicCodeBlocks = [];
+
+    function flushHeuristicCodeBlocks() {
+        if (!heuristicCodeBlocks.length) {
+            return;
+        }
+        codeBlockIndex += 1;
+        renderedBlocks.push(createCodeBlockHtml("", escapeHtml(heuristicCodeBlocks.join("\n\n")), `heuristic-${codeBlockIndex}`));
+        heuristicCodeBlocks = [];
+    }
+
+    for (const block of blocks) {
+        if (/^@@CODE_BLOCK_\d+@@$/.test(block)) {
+            flushHeuristicCodeBlocks();
+            renderedBlocks.push(renderTextBlock(block));
+            continue;
+        }
+
+        if (looksLikeCodeBlock(block)) {
+            heuristicCodeBlocks.push(block);
+            continue;
+        }
+
+        flushHeuristicCodeBlocks();
+        renderedBlocks.push(renderTextBlock(block));
+    }
+    flushHeuristicCodeBlocks();
+
+    let html = renderedBlocks.join("");
 
     for (const codeBlock of codeBlocks) {
         html = html.replace(codeBlock.placeholder, codeBlock.html);

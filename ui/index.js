@@ -540,7 +540,11 @@ function startUploadStatus(fileName) {
     }, 1000);
 }
 
-function getExtractionPreviewText(file, maxChars = 8000) {
+function getExtractionPreviewLimit() {
+    return Number(window.MAX_DOCUMENT_PROMPT_CHARS || 20000);
+}
+
+function getExtractionPreviewText(file, maxChars = getExtractionPreviewLimit()) {
     const text = String(file?.text || "").trim();
     if (!text) {
         return "No extractable text was found.";
@@ -551,15 +555,23 @@ function getExtractionPreviewText(file, maxChars = 8000) {
     return `${text.slice(0, maxChars).trim()}\n\n[Extraction preview truncated.]`;
 }
 
+function countExtractedPdfPages(file) {
+    const text = String(file?.text || "");
+    const pageMarkers = text.match(/^Page\s+\d+\b/gm);
+    return pageMarkers ? pageMarkers.length : 0;
+}
+
 function renderExtractionPreview(file, mode = "input") {
-    const previewText = getExtractionPreviewText(file, mode === "message" ? 10000 : 5000);
+    const previewText = getExtractionPreviewText(file);
     const characterCount = Number(file?.charCount || 0).toLocaleString();
+    const pageCount = countExtractedPdfPages(file);
+    const pageMeta = pageCount ? ` · ${pageCount} pages` : "";
     const extractionLabel = getExtractionLabel(file);
     return `
         <details class="extraction-preview ${mode}" ${mode === "message" ? "" : "open"}>
             <summary>
                 <span>Original extraction</span>
-                <span class="extraction-meta">${escapeHtml(extractionLabel)} · ${characterCount} chars</span>
+                <span class="extraction-meta">${escapeHtml(extractionLabel)}${pageMeta} · ${characterCount} chars</span>
             </summary>
             <pre>${escapeHtml(previewText)}</pre>
         </details>

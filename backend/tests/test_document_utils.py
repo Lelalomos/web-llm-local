@@ -7,8 +7,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 from document_utils import (
     DEFAULT_SUMMARY_PROMPT,
+    DOCUMENT_CHAT_NUM_CTX,
     MAX_DOCUMENT_PROMPT_CHARS,
+    _has_all_pdf_page_markers,
     _extract_text_from_surya_results,
+    _extract_pdf_text_with_page_image_ocr,
     _extract_pdf_with_surya,
     _extract_pdf_text_with_surya_docling,
     PDF_FAST_TEXT_MIN_CHARS,
@@ -35,6 +38,8 @@ class DocumentUtilsTests(unittest.TestCase):
 
     def test_extract_excel_text_from_live_test_file(self):
         excel_path = TEST_DIR / "Transfer's Mos.xlsx"
+        if not excel_path.exists():
+            self.skipTest(f"Optional live Excel fixture is missing: {excel_path}")
         text, character_count = extract_document_text(excel_path.name, excel_path.read_bytes())
 
         self.assertGreater(character_count, 0)
@@ -52,6 +57,10 @@ class DocumentUtilsTests(unittest.TestCase):
 
         self.assertIn("Content truncated", prompt)
         self.assertLess(len(prompt), len(large_text) + 200)
+
+    def test_document_prompt_limit_allows_multi_page_pdf_ocr_text(self):
+        self.assertEqual(MAX_DOCUMENT_PROMPT_CHARS, 20000)
+        self.assertEqual(DOCUMENT_CHAT_NUM_CTX, 8192)
 
     def test_unsupported_extension_raises_clear_error(self):
         with self.assertRaisesRegex(ValueError, "Unsupported file format"):
@@ -259,6 +268,89 @@ class DocumentUtilsTests(unittest.TestCase):
         self.assertIn("Page 1\nภาษาไทย", text)
         self.assertIn("Page 2\nEmbedded text", text)
         self.assertGreater(character_count, 0)
+
+    def test_page_image_pdf_ocr_renders_every_page_to_jpg_for_qwen_vl(self):
+        fake_document = MagicMock()
+        fake_document.__enter__.return_value = fake_document
+        fake_document.page_count = 2
+        fake_document.load_page.side_effect = ["page-1", "page-2"]
+
+        with patch("document_utils.pymupdf.open", return_value=fake_document), patch("document_utils._render_pdf_page_to_jpg", side_effect=[b"jpg-1", b"jpg-2"]) as render_mock, patch("document_utils._extract_image_text_with_vision_model", side_effect=["OCR one", "OCR two"]) as vision_mock:
+            text = _extract_pdf_text_with_page_image_ocr(
+                b"%PDF-1.4",
+                "scan.pdf",
+                {
+                    "vision_ocr_model": "qwen2.5vl:3b",
+                    "vision_ocr_timeout_seconds": 120,
+                    "vision_ocr_prompt": "Extract text",
+                },
+                "http://ollama:11434",
+            )
+
+        self.assertEqual(render_mock.call_count, 2)
+        self.assertEqual(vision_mock.call_count, 2)
+        self.assertIn("Page 1\nOCR one", text)
+        self.assertIn("Page 2\nOCR two", text)
+
+    def test_page_image_pdf_ocr_falls_back_from_qwen_to_surya_docling(self):
+        with patch("document_utils._pdf_page_count", return_value=1), patch("document_utils._extract_pdf_page_images_with_vision_ocr", side_effect=RuntimeError("qwen failed")), patch("document_utils._extract_pdf_with_surya", return_value="Page 1\nsurya text") as surya_mock, patch("document_utils._extract_pdf_page_images_with_tesseract") as tesseract_mock:
+            text = _extract_pdf_text_with_page_image_ocr(
+                b"%PDF-1.4",
+                "scan.pdf",
+                {"vision_ocr_model": "qwen2.5vl:3b"},
+                "http://ollama:11434",
+            )
+
+        self.assertEqual(text, "OCR Result (Surya)\nPage 1\nsurya text")
+        surya_mock.assert_called_once()
+        tesseract_mock.assert_not_called()
+
+    def test_page_image_pdf_ocr_falls_back_from_qwen_and_surya_to_tesseract(self):
+        with patch("document_utils._pdf_page_count", return_value=1), patch("document_utils._extract_pdf_page_images_with_vision_ocr", side_effect=RuntimeError("qwen failed")), patch("document_utils._extract_pdf_with_surya", side_effect=RuntimeError("surya failed")), patch("document_utils._extract_pdf_page_images_with_tesseract", return_value="Page 1\ntesseract text") as tesseract_mock:
+            text = _extract_pdf_text_with_page_image_ocr(
+                b"%PDF-1.4",
+                "scan.pdf",
+                {"vision_ocr_model": "qwen2.5vl:3b"},
+                "http://ollama:11434",
+            )
+
+        self.assertEqual(text, "Page 1\ntesseract text")
+        tesseract_mock.assert_called_once()
+
+    def test_page_image_pdf_ocr_falls_back_when_qwen_returns_partial_pages(self):
+        with patch("document_utils._pdf_page_count", return_value=6), patch("document_utils._extract_pdf_page_images_with_vision_ocr", return_value="Page 1\none\n\nPage 2\ntwo\n\nPage 3\nthree"), patch("document_utils._extract_pdf_with_surya", side_effect=RuntimeError("surya failed")), patch("document_utils._extract_pdf_page_images_with_tesseract", return_value="\n\n".join(f"Page {page}\ntext {page}" for page in range(1, 7))) as tesseract_mock:
+            text = _extract_pdf_text_with_page_image_ocr(
+                b"%PDF-1.4",
+                "scan.pdf",
+                {"vision_ocr_model": "qwen2.5vl:3b"},
+                "http://ollama:11434",
+            )
+
+        self.assertTrue(_has_all_pdf_page_markers(text, 6))
+        tesseract_mock.assert_called_once()
+
+    def test_has_all_pdf_page_markers_requires_every_page(self):
+        self.assertTrue(_has_all_pdf_page_markers("Page 1\none\n\nPage 2\ntwo", 2))
+        self.assertFalse(_has_all_pdf_page_markers("Page 1\none", 2))
+
+    def test_pdf_page_image_ocr_mode_ignores_embedded_text(self):
+        with patch("document_utils._pdf_page_count", return_value=1), patch("document_utils._extract_pdf_page_images_with_vision_ocr", return_value="Page 1\npage image text") as page_ocr_mock, patch("document_utils._extract_pdf_embedded_text") as embedded_mock:
+            text, character_count = extract_document_text(
+                "text.pdf",
+                b"%PDF-1.4",
+                {
+                    "pdf_extraction_mode": "page_image_ocr",
+                    "vision_ocr_model": "qwen2.5vl:3b",
+                    "vision_ocr_timeout_seconds": 120,
+                    "vision_ocr_prompt": "Extract text",
+                },
+                "http://ollama:11434",
+            )
+
+        self.assertEqual(text, "Page 1\npage image text")
+        self.assertGreater(character_count, 0)
+        page_ocr_mock.assert_called_once()
+        embedded_mock.assert_not_called()
 
     def test_extract_png_image_with_ocr(self):
         image_bytes = _build_text_image("IMAGE OCR TEST")

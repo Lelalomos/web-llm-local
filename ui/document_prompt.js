@@ -1,5 +1,5 @@
 const DEFAULT_DOCUMENT_PROMPT = "Summarize this document and highlight the key points. Include important extracted values such as dates, IDs, names, line items, totals, and amounts when present.";
-const MAX_DOCUMENT_PROMPT_CHARS = 5000;
+const MAX_DOCUMENT_PROMPT_CHARS = 20000;
 
 function truncateDocumentText(fileText) {
     const normalizedText = String(fileText || "");

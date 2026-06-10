@@ -50,6 +50,7 @@ class ConfigStoreTests(unittest.TestCase):
                 "search_context_enhancer_timeout_seconds": 45,
                 "search_context_enhancer_max_chars": 6000,
                 "ocr_engine": "qwen_vl",
+                "pdf_extraction_mode": "page_image_ocr",
                 "vision_ocr_model": "qwen3-vl:latest",
                 "vision_ocr_timeout_seconds": 120,
                 "vision_ocr_prompt": "Extract text",
@@ -78,6 +79,10 @@ class ConfigStoreTests(unittest.TestCase):
     def test_validate_app_config_rejects_invalid_ocr_engine(self):
         with self.assertRaisesRegex(Exception, "ocr_engine must be"):
             validate_app_config({"ocr_engine": "bad_engine"})
+
+    def test_validate_app_config_rejects_invalid_pdf_extraction_mode(self):
+        with self.assertRaisesRegex(Exception, "pdf_extraction_mode must be"):
+            validate_app_config({"pdf_extraction_mode": "bad_mode"})
 
     def test_validate_app_config_rejects_empty_chat_summary_prompt(self):
         with self.assertRaisesRegex(Exception, "chat_summary_prompt must be"):

@@ -20,7 +20,25 @@ class ChatMemoryTests(unittest.TestCase):
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertIn("User likes concise answers", payload["messages"][0]["content"])
         self.assertIn("Always follow the current request", payload["messages"][0]["content"])
+        self.assertIn("current conversation has highest priority", payload["messages"][0]["content"].lower())
         self.assertIn("Prefer concrete remembered facts", payload["messages"][0]["content"])
+
+    def test_inject_memory_context_adds_current_name_fact(self):
+        payload = {
+            "messages": [
+                {"role": "user", "content": "hey i'am programmer and i'm mos what is your name?"},
+                {"role": "assistant", "content": "I am Gemma 4."},
+                {"role": "user", "content": "you remember my name?"},
+            ]
+        }
+
+        with patch("chat_memory.load_memory_text", return_value="The assistant did not know the user's name."):
+            injected = chat_memory.inject_memory_context(payload)
+
+        self.assertTrue(injected)
+        self.assertIn("The user stated their name is mos", payload["messages"][0]["content"])
+        self.assertIn("Do not answer with a generic no-memory disclaimer", payload["messages"][0]["content"])
+        self.assertNotIn("name is programmer", payload["messages"][0]["content"])
 
     def test_build_chat_transcript_limits_large_input(self):
         messages = [{"role": "user", "content": "a" * (chat_memory.MAX_SUMMARY_TRANSCRIPT_CHARS + 50)}]

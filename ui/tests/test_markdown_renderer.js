@@ -24,6 +24,30 @@ assert.equal(looksLikeCodeBlock("This is normal text.\nThis is another sentence.
 const heuristicCodeHtml = renderMarkdown("def add(a, b):\n    return a + b\nprint(add(1, 2))");
 assert.equal(heuristicCodeHtml.includes('class="code-container"'), true);
 
+const goCodeWithoutFence = renderMarkdown(`func fetchStock(ticker string) error {
+    resp, err := http.Get("https://example.com")
+    if err != nil {
+        return fmt.Errorf("error making HTTP request: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return fmt.Errorf("received non-200 status code: %d", resp.StatusCode)
+    }
+
+    var data StockResponse
+    err = json.NewDecoder(resp.Body).Decode(&data)
+    if err != nil {
+        return fmt.Errorf("error decoding JSON response: %w", err)
+    }
+
+    fmt.Printf("Successfully fetched data for %s:\\n", ticker)
+    return nil
+}`);
+assert.equal((goCodeWithoutFence.match(/class="code-container"/g) || []).length, 1);
+assert.equal(goCodeWithoutFence.includes("resp.StatusCode"), true);
+assert.equal(goCodeWithoutFence.includes("var data StockResponse"), true);
+
 const tableHtml = renderMarkdown("| Description | Quantity | Unit Price | Amount |\n|---|---|---|---|\n| Subscription GLM Coding Pro | | $36.45 | $36.45 |");
 assert.equal(tableHtml.includes('class="markdown-table-wrapper"'), true);
 assert.equal(tableHtml.includes("<th>Description</th>"), true);

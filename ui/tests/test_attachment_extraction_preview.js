@@ -10,6 +10,10 @@ assert.match(html, /accept="[^"]*\.jpg[^"]*\.jpeg[^"]*\.png[^"]*"/);
 assert.match(html, /Attach File \(PDF, Office, Image, TXT, CSV\.\.\.\)/);
 
 assert.match(js, /function renderExtractionPreview\(file, mode = "input"\)/);
+assert.match(js, /function getExtractionPreviewLimit\(\)/);
+assert.match(js, /window\.MAX_DOCUMENT_PROMPT_CHARS \|\| 20000/);
+assert.match(js, /function countExtractedPdfPages\(file\)/);
+assert.match(js, /\^Page\\s\+\\d\+\\b\/gm/);
 assert.match(js, /function getExtractionLabel\(file\)/);
 assert.match(js, /Qwen-VL: \$\{model\}/);
 assert.match(js, /Tesseract fallback from \$\{fallbackFrom\}/);
@@ -21,6 +25,7 @@ assert.match(js, /URL\.revokeObjectURL\(file\.imagePreviewUrl\)/);
 assert.match(js, /onload="URL\.revokeObjectURL\(this\.src\)"/);
 assert.match(js, /Still working\. OCR\/model extraction can take a while/);
 assert.match(js, /Original extraction/);
+assert.match(js, /\$\{pageMeta\} · \$\{characterCount\} chars/);
 assert.match(js, /renderAttachmentChip\(attachedFile\)/);
 assert.match(js, /appendMessage\("user", userVisiblePrompt, activeFileName, activeFile\)/);
 assert.match(js, /function clearAttachmentInputPreview\(\)/);
