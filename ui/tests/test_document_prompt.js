@@ -6,6 +6,7 @@ assert.equal(
     buildFinalPrompt("", "report.pdf", "example body").includes(DEFAULT_DOCUMENT_PROMPT),
     true,
 );
+assert.equal(DEFAULT_DOCUMENT_PROMPT.includes("amounts"), true);
 assert.equal(
     buildFinalPrompt("Summarize this", "report.pdf", "example body").includes("Use the file content above to answer this prompt: Summarize this"),
     true,

@@ -39,6 +39,35 @@ class ChatMemoryTests(unittest.TestCase):
         self.assertLessEqual(len(memory_text), chat_memory.MAX_MEMORY_PROMPT_CHARS + len("[Earlier memory truncated]\n\n"))
         self.assertIn("[Earlier memory truncated]", memory_text)
 
+    def test_load_memory_text_uses_configured_prompt_context_limit(self):
+        with _temporary_memory_paths():
+            chat_memory.ensure_chat_memory_dirs()
+            chat_memory.CHAT_MEMORY_FILE.write_text("a" * 5000, encoding="utf-8")
+
+            memory_text = chat_memory.load_memory_text(1000)
+
+        self.assertLessEqual(len(memory_text), 1000 + len("[Earlier memory truncated]\n\n"))
+        self.assertIn("[Earlier memory truncated]", memory_text)
+
+    def test_load_memory_text_selects_relevant_chunks_with_prompt_limit(self):
+        memory_text = "\n\n".join(
+            [
+                "The user's favorite database is PostgreSQL.",
+                "The user's name is Mos and the user is a programmer.",
+                "The user likes stock market news.",
+            ]
+        )
+
+        with _temporary_memory_paths():
+            chat_memory.ensure_chat_memory_dirs()
+            chat_memory.CHAT_MEMORY_FILE.write_text(memory_text, encoding="utf-8")
+
+            selected = chat_memory.load_memory_text(120, "USER: hey i am programmer and i am mos what is your name?")
+
+        self.assertIn("Mos", selected)
+        self.assertIn("programmer", selected)
+        self.assertNotIn("PostgreSQL", selected)
+
     def test_default_memory_prompt_window_keeps_concrete_name_before_later_unknown_notes(self):
         name_note = '## Important Facts\nUser full name is "Memory Window Test User."'
         unknown_note = "## Important Facts\nThe assistant did not know the user's name."

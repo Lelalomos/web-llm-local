@@ -335,11 +335,12 @@ class AppSearchIntegrationTests(unittest.TestCase):
             "messages": [{"role": "user", "content": "remember my name?"}],
         }
 
-        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "memory_used": {"general": True}}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "answer"}}), patch("app._persist_completed_chat"):
+        with patch("app.load_app_config", return_value={"default_web_search_mode": "off", "skill_markdown_enabled": False, "memory_used": {"general": True}, "chat_memory_prompt_max_chars": 1500}), patch("app._run_pending_summaries"), patch("app.inject_memory_context") as memory_mock, patch("app._complete_non_stream_chat", return_value={"message": {"content": "answer"}}), patch("app._persist_completed_chat"):
             response = chat(payload)
 
         self.assertEqual(response["message"]["content"], "answer")
         memory_mock.assert_called_once()
+        self.assertEqual(memory_mock.call_args.args[1], 1500)
 
     def test_code_writer_chat_uses_memory_when_config_enabled(self):
         payload = {

@@ -17,6 +17,22 @@ SUMMARY_RAG_ENABLED = os.getenv("CHAT_MEMORY_SUMMARY_RAG_ENABLED", "true").lower
 SUMMARY_RAG_MAX_CHARS = int(os.getenv("CHAT_MEMORY_SUMMARY_RAG_CHARS", "6000"))
 AUTO_SUMMARY_IDLE_SECONDS = int(os.getenv("CHAT_MEMORY_IDLE_SECONDS", "900"))
 DEFAULT_SESSION_ID = "session"
+MEMORY_RAG_STOPWORDS = {
+    "user",
+    "assistant",
+    "what",
+    "your",
+    "this",
+    "that",
+    "with",
+    "from",
+    "have",
+    "will",
+    "about",
+    "their",
+    "they",
+    "them",
+}
 
 CHAT_SUMMARY_PROMPT = (
     "You are creating persistent memory notes about the user. "
@@ -49,15 +65,24 @@ def build_memory_system_prompt(memory_text: str) -> str:
     )
 
 
-def load_memory_text() -> str:
+def load_memory_text(max_chars: int | None = None, transcript: str = "") -> str:
     memory_text = load_full_memory_text()
     if not memory_text:
         return ""
 
-    if len(memory_text) <= MAX_MEMORY_PROMPT_CHARS:
+    prompt_chars = MAX_MEMORY_PROMPT_CHARS if max_chars is None else max(0, int(max_chars))
+    if prompt_chars <= 0:
+        return ""
+
+    if len(memory_text) <= prompt_chars:
         return memory_text
 
-    truncated_text = memory_text[-MAX_MEMORY_PROMPT_CHARS:].lstrip()
+    if transcript:
+        selected_text = select_summary_rag_context(memory_text, transcript, prompt_chars)
+        if selected_text:
+            return "[Relevant memory selected]\n\n" + selected_text
+
+    truncated_text = memory_text[-prompt_chars:].lstrip()
     return "[Earlier memory truncated]\n\n" + truncated_text
 
 
@@ -68,8 +93,8 @@ def load_full_memory_text() -> str:
     return CHAT_MEMORY_FILE.read_text(encoding="utf-8").strip()
 
 
-def inject_memory_context(payload: dict) -> bool:
-    memory_text = load_memory_text()
+def inject_memory_context(payload: dict, max_chars: int | None = None) -> bool:
+    memory_text = load_memory_text(max_chars, build_chat_transcript(payload.get("messages", [])))
     if not memory_text:
         return False
 
@@ -99,7 +124,7 @@ def build_chat_transcript(messages: list[dict]) -> str:
 
 
 def _tokenize_for_memory_rag(text: str) -> set[str]:
-    return {token.lower() for token in re.findall(r"[A-Za-z0-9_ก-๙]{4,}", text)}
+    return {token.lower() for token in re.findall(r"[A-Za-z0-9_ก-๙]{4,}", text) if token.lower() not in MEMORY_RAG_STOPWORDS}
 
 
 def select_summary_rag_context(memory_text: str, transcript: str, max_chars: int) -> str:

@@ -20,7 +20,8 @@ DEFAULT_APP_CONFIG = {
     "default_web_search_mode": "auto",
     "skill_markdown_enabled": True,
     "skill_prompt_max_chars": 12000,
-    "web_search_context_max_chars": 6000,
+    "web_search_context_max_chars": 2500,
+    "chat_memory_prompt_max_chars": 2000,
     "search_provider": "auto",
     "searxng_enabled": True,
     "searxng_url": "http://searxng:8080",
@@ -151,6 +152,7 @@ def validate_app_config(candidate: dict) -> dict:
 
     _require_int(normalized, "skill_prompt_max_chars", minimum=0, maximum=50000)
     _require_int(normalized, "web_search_context_max_chars", minimum=0, maximum=50000)
+    _require_int(normalized, "chat_memory_prompt_max_chars", minimum=0, maximum=12000)
     _require_int(normalized, "chat_max_continuations", minimum=0, maximum=5)
     _validate_memory_used(normalized.get("memory_used"))
     if not isinstance(normalized.get("chat_summary_prompt"), str) or not normalized.get("chat_summary_prompt").strip():

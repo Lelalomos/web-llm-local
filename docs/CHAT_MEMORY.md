@@ -45,7 +45,8 @@ The model is asked to write these sections:
 - the running memory file does not include session id, model name, task mode, or timestamp metadata
 - active unsummarized chats live in `active_sessions/`
 - the memory file is trimmed before prompt injection so it does not grow without limit inside the prompt
-- the default injected memory window is `12000` characters and can be changed with `CHAT_MEMORY_PROMPT_CHARS`
+- the default injected memory window is controlled by `chat_memory_prompt_max_chars` in `backend/config/app_config.json`
+- `CHAT_MEMORY_PROMPT_CHARS` is only the fallback default used by the memory helper when no app config limit is passed
 - prompt memory injection is controlled per task mode by `memory_used` in `backend/config/app_config.json`
 - uploaded-file requests use the `memory_used.upload_file` setting and default to not injecting saved summary memory
 - web-search requests do not inject saved summary memory even when their task mode is enabled in `memory_used`
@@ -61,6 +62,7 @@ Configure which task modes can read saved summary memory:
 
 ```json
 {
+  "chat_memory_prompt_max_chars": 2000,
   "memory_used": {
     "general": true,
     "code_writer": true,

@@ -512,7 +512,8 @@ def chat(payload: dict = Body(...)):
     direct_context_used = _inject_direct_url_context(payload, app_config)
     web_search_enabled = _search_requested(payload, app_config, task_mode, direct_context_used)
     if _should_inject_memory_context(task_mode, web_search_enabled, app_config, is_document_prompt):
-        inject_memory_context(payload)
+        memory_prompt_max_chars = app_config.get("chat_memory_prompt_max_chars")
+        inject_memory_context(payload, int(memory_prompt_max_chars) if memory_prompt_max_chars is not None else None)
     search_used = _inject_search_context(payload, web_search_enabled, app_config)
     max_continuations = int(app_config.get("chat_max_continuations", 0) or 0)
                     

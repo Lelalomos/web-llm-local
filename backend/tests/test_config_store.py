@@ -23,6 +23,7 @@ class ConfigStoreTests(unittest.TestCase):
                 "skill_markdown_enabled": False,
                 "skill_prompt_max_chars": 1000,
                 "web_search_context_max_chars": 2000,
+                "chat_memory_prompt_max_chars": 1500,
                 "search_provider": "searxng",
                 "searxng_enabled": True,
                 "searxng_url": "http://searxng:8080",
@@ -81,6 +82,13 @@ class ConfigStoreTests(unittest.TestCase):
     def test_validate_app_config_rejects_empty_chat_summary_prompt(self):
         with self.assertRaisesRegex(Exception, "chat_summary_prompt must be"):
             validate_app_config({"chat_summary_prompt": ""})
+
+    def test_validate_app_config_rejects_invalid_memory_prompt_limit(self):
+        with self.assertRaisesRegex(Exception, "chat_memory_prompt_max_chars must be"):
+            validate_app_config({"chat_memory_prompt_max_chars": 12001})
+
+    def test_default_web_search_context_fits_small_model_context(self):
+        self.assertEqual(DEFAULT_APP_CONFIG["web_search_context_max_chars"], 2500)
 
     def test_validate_app_config_accepts_partial_memory_used(self):
         config = validate_app_config({"memory_used": {"general": True, "code_writer": True, "upload_file": False}})

@@ -12,6 +12,7 @@ class TaskModeTests(unittest.TestCase):
         self.assertEqual(task_mode, "code_writer")
         self.assertEqual(payload["messages"][0]["role"], "system")
         self.assertIn("coding assistant", payload["messages"][0]["content"])
+        self.assertIn("simple runnable REST API", payload["messages"][0]["content"])
         self.assertFalse(payload["think"])
         self.assertEqual(payload["options"]["num_predict"], 1600)
 

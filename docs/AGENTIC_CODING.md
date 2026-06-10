@@ -98,6 +98,7 @@ Search provider config:
 
 `search_provider` can be `auto`, `searxng`, or `legacy`.
 Use `auto` for combined search. Use `searxng` or `legacy` only when debugging one provider path.
+The default `web_search_context_max_chars` is `2500` so search context leaves enough response room for the default 2048-token local model context.
 
 Debug search output:
 
